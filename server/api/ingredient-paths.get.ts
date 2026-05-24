@@ -9,7 +9,6 @@ type IngredientDoc = {
 type RecipeDoc = {
 	_id: ObjectId;
 	title?: string;
-	link?: string;
 	ingredients?: Array<{
 		ingedientId?: ObjectId;
 	}>;
@@ -18,23 +17,18 @@ type RecipeDoc = {
 type NeighborAgg = {
 	_id: ObjectId;
 	count: number;
-	recipe: {
-		title?: string;
-		link?: string;
-	};
+	recipeTitle?: string;
 };
 
 type IngredientNeighbor = {
 	id: ObjectId;
 	name: string;
 	recipeTitle: string;
-	recipeLink: string;
 	count: number;
 };
 
 type PathRecipeStep = {
 	title: string;
-	link: string;
 };
 
 type PathState = {
@@ -142,7 +136,6 @@ export default defineEventHandler(async (event) => {
 				{
 					$project: {
 						title: 1,
-						link: 1,
 						ingredients: 1,
 					},
 				},
@@ -153,21 +146,10 @@ export default defineEventHandler(async (event) => {
 					},
 				},
 				{
-					$sort: {
-						title: 1,
-						link: 1,
-					},
-				},
-				{
 					$group: {
 						_id: '$ingredients.ingedientId',
 						count: { $sum: 1 },
-						recipe: {
-							$first: {
-								title: '$title',
-								link: '$link',
-							},
-						},
+						recipeTitle: { $min: '$title' },
 					},
 				},
 				{ $sort: { count: -1 } },
@@ -197,8 +179,7 @@ export default defineEventHandler(async (event) => {
 				return {
 					id: pair._id,
 					name,
-					recipeTitle: pair.recipe.title?.trim() || '(untitled recipe)',
-					recipeLink: pair.recipe.link?.trim() || '',
+					recipeTitle: pair.recipeTitle?.trim() || '(untitled recipe)',
 					count: pair.count,
 				};
 			})
@@ -221,6 +202,8 @@ export default defineEventHandler(async (event) => {
 			recipeChain: [],
 		},
 	];
+	let queueIndex = 0;
+	const queuedAtDepth = new Set<string>([`${String(fromIngredient._id)}|0`]);
 	const seenRecipeChains = new Set<string>();
 	const foundPaths: Array<{
 		ingredientChain: string[];
@@ -228,11 +211,9 @@ export default defineEventHandler(async (event) => {
 		hops: number;
 	}> = [];
 
-	while (queue.length > 0 && foundPaths.length < limit) {
-		const state = queue.shift();
-		if (!state) {
-			break;
-		}
+	while (queueIndex < queue.length && foundPaths.length < limit) {
+		const state = queue[queueIndex];
+		queueIndex += 1;
 
 		const hops = state.recipeChain.length;
 		const currentIngredientId =
@@ -253,7 +234,7 @@ export default defineEventHandler(async (event) => {
 			continue;
 		}
 
-		if (hops >= maxHops || queue.length > maxQueue) {
+		if (hops >= maxHops || queue.length - queueIndex > maxQueue) {
 			continue;
 		}
 
@@ -267,6 +248,13 @@ export default defineEventHandler(async (event) => {
 				continue;
 			}
 
+			const nextHops = hops + 1;
+			const depthKey = `${neighborIdString}|${nextHops}`;
+			if (queuedAtDepth.has(depthKey)) {
+				continue;
+			}
+			queuedAtDepth.add(depthKey);
+
 			queue.push({
 				ingredientIds: [...state.ingredientIds, neighbor.id],
 				ingredientNames: [...state.ingredientNames, neighbor.name],
@@ -274,7 +262,6 @@ export default defineEventHandler(async (event) => {
 					...state.recipeChain,
 					{
 						title: neighbor.recipeTitle,
-						link: neighbor.recipeLink,
 					},
 				],
 			});

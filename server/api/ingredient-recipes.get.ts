@@ -2,7 +2,6 @@ import { ObjectId } from 'mongodb';
 
 type RecipeTitleDoc = {
 	title: string;
-	link?: string;
 	ingredients?: Array<{
 		ingedientId?: ObjectId;
 	}>;
@@ -10,7 +9,6 @@ type RecipeTitleDoc = {
 
 type RecipeListItem = {
 	title: string;
-	link: string;
 	containsCurrentIngredient: boolean;
 };
 
@@ -59,7 +57,7 @@ export default defineEventHandler(async (event) => {
 	const docs = await recipes
 		.find(
 			{ 'ingredients.ingedientId': objectId },
-			{ projection: { _id: 0, title: 1, link: 1, ingredients: 1 } },
+			{ projection: { _id: 0, title: 1, ingredients: 1 } },
 		)
 		.sort({ title: 1 })
 		.toArray();
@@ -67,7 +65,6 @@ export default defineEventHandler(async (event) => {
 	const titles = docs
 		.map((doc): RecipeListItem | null => {
 			const title = doc.title?.trim();
-			const link = doc.link?.trim();
 			if (!title) {
 				return null;
 			}
@@ -85,7 +82,6 @@ export default defineEventHandler(async (event) => {
 
 			return {
 				title,
-				link: link ?? '',
 				containsCurrentIngredient,
 			};
 		})

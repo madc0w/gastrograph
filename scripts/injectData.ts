@@ -20,8 +20,6 @@ type RecipeDoc = {
 	title: string;
 	ingredients: RecipeIngredient[];
 	directions: string[];
-	link: string;
-	source: string;
 	ner: string;
 };
 
@@ -29,8 +27,6 @@ type ParsedRow = {
 	title: string;
 	ingredients: string[];
 	directions: string[];
-	link: string;
-	source: string;
 	nerIngredients: string[];
 };
 
@@ -413,23 +409,6 @@ function findValueByHeader(
 	return values[idx] ?? '';
 }
 
-function normalizeRecipeLink(link: string): string {
-	const trimmed = link.trim();
-	if (!trimmed) {
-		return '';
-	}
-
-	if (/^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)) {
-		return trimmed;
-	}
-
-	if (trimmed.startsWith('//')) {
-		return `https:${trimmed}`;
-	}
-
-	return `https://${trimmed}`;
-}
-
 function parseRow(headers: string[], line: string): ParsedRow | null {
 	const values = parseCsvLine(line);
 
@@ -448,8 +427,6 @@ function parseRow(headers: string[], line: string): ParsedRow | null {
 	const directions = safeJsonStringArray(
 		findValueByHeader(headers, values, 'directions'),
 	);
-	const link = normalizeRecipeLink(findValueByHeader(headers, values, 'link'));
-	const source = findValueByHeader(headers, values, 'source').trim();
 	const nerIngredients = splitNerIngredients(
 		findValueByHeader(headers, values, 'NER'),
 	);
@@ -458,8 +435,6 @@ function parseRow(headers: string[], line: string): ParsedRow | null {
 		title,
 		ingredients,
 		directions,
-		link,
-		source,
 		nerIngredients,
 	};
 }
@@ -526,10 +501,8 @@ async function importCsvData(): Promise<void> {
 		const recipesCollection = db.collection('Recipes');
 
 		await ingredientsCollection.createIndex({ name: 1 }, { unique: true });
-		await recipesCollection.createIndex(
-			{ title: 1, source: 1, link: 1 },
-			{ unique: true },
-		);
+		await recipesCollection.createIndex({ title: 1 }, { unique: true });
+		await recipesCollection.createIndex({ 'ingredients.ingedientId': 1 });
 
 		const totalRows = await countDataLines(DATASET_PATH);
 		if (totalRows === 0) {
@@ -613,18 +586,12 @@ async function importCsvData(): Promise<void> {
 					title: parsed.title,
 					ingredients: ingredientRefs,
 					directions: parsed.directions,
-					link: parsed.link,
-					source: parsed.source,
 					ner: parsed.nerIngredients.join(', '),
 				};
 
 				await recipesCollection.updateOne(
-					{
-						title: recipeDoc.title,
-						source: recipeDoc.source,
-						link: recipeDoc.link,
-					},
-					{ $set: recipeDoc },
+					{ title: recipeDoc.title },
+					{ $set: recipeDoc, $unset: { link: '', source: '' } },
 					{ upsert: true },
 				);
 

@@ -72,7 +72,7 @@
 					</div>
 
 					<div
-						v-if="hoverCard.visible"
+						v-if="hoverCard.isVisible"
 						ref="hoverCardRef"
 						class="hoverCard"
 						:style="{
@@ -83,11 +83,13 @@
 						@pointerleave="onHoverCardPointerLeave"
 					>
 						<p class="hoverTitle">{{ hoverCard.label }}</p>
-						<p v-if="hoverCard.loading" class="hoverMeta">Loading recipes...</p>
+						<p v-if="hoverCard.isLoading" class="hoverMeta">
+							Loading recipes...
+						</p>
 						<p v-else class="hoverMeta">
 							{{ hoverCard.titles.length }} recipes use this ingredient
 						</p>
-						<ul v-if="!hoverCard.loading && hoverCard.titles.length > 0">
+						<ul v-if="!hoverCard.isLoading && hoverCard.titles.length > 0">
 							<li
 								v-for="recipe in hoverCard.titles"
 								:key="recipe.title"
@@ -104,7 +106,7 @@
 							</li>
 						</ul>
 						<p
-							v-if="!hoverCard.loading && hoverCard.titles.length === 0"
+							v-if="!hoverCard.isLoading && hoverCard.titles.length === 0"
 							class="hoverMeta"
 						>
 							No recipes found.
@@ -148,7 +150,7 @@
 								:class="{
 									centerNode: node.isCenter,
 									hoveredNode:
-										hoverCard.visible && hoverCard.nodeId === node.id,
+										hoverCard.isVisible && hoverCard.nodeId === node.id,
 								}"
 								:transform="`translate(${node.x}, ${node.y})`"
 								@pointerdown="startDragging($event, node.id)"
@@ -258,7 +260,7 @@
 
 			<Teleport to="body">
 				<div
-					v-if="recipeModal.visible"
+					v-if="recipeModal.isVisible"
 					class="recipeModalOverlay"
 					@click.self="closeRecipeModal"
 				>
@@ -282,7 +284,7 @@
 							</button>
 						</header>
 
-						<p v-if="recipeModal.loading" class="recipeModalState">
+						<p v-if="recipeModal.isLoading" class="recipeModalState">
 							Loading recipe...
 						</p>
 						<p
@@ -339,7 +341,6 @@ type IngredientRecipesResponse = {
 
 type RecipeDetails = {
 	title: string;
-	link: string;
 	ingredients: Array<{
 		ingredient: string;
 	}>;
@@ -348,7 +349,6 @@ type RecipeDetails = {
 
 type RecipeListItem = {
 	title: string;
-	link: string;
 	containsCurrentIngredient: boolean;
 };
 
@@ -379,7 +379,6 @@ type IngredientPath = {
 
 type RecipePathItem = {
 	title: string;
-	link: string;
 };
 
 type IngredientPathResponse = {
@@ -428,15 +427,15 @@ const pathErrorText = ref('');
 const isPathLoading = ref(false);
 
 const recipeModal = reactive<{
-	visible: boolean;
+	isVisible: boolean;
 	title: string;
-	loading: boolean;
+	isLoading: boolean;
 	error: string;
 	recipe: RecipeDetails | null;
 }>({
-	visible: false,
+	isVisible: false,
 	title: '',
-	loading: false,
+	isLoading: false,
 	error: '',
 	recipe: null,
 });
@@ -468,25 +467,25 @@ let simulationFrame = 0;
 let hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
 const dragState = reactive({
 	nodeId: '',
-	active: false,
-	moved: false,
+	isActive: false,
+	isMoved: false,
 	startX: 0,
 	startY: 0,
 });
 
 const hoverCard = reactive({
-	visible: false,
+	isVisible: false,
 	nodeId: '',
 	label: '',
 	titles: [] as RecipeListItem[],
-	loading: false,
+	isLoading: false,
 	left: 0,
 	top: 0,
 });
 
 const hoverState = reactive({
-	overNode: false,
-	overCard: false,
+	isOverNode: false,
+	isOverCard: false,
 });
 
 const recipeTitlesByNodeId = reactive<Record<string, RecipeListItem[]>>({});
@@ -708,24 +707,24 @@ function onPathIngredientSelected(_field: 'from' | 'to'): void {
 }
 
 function openRecipeModal(recipe: RecipeListItem | RecipePathItem): void {
-	recipeModal.visible = true;
+	recipeModal.isVisible = true;
 	recipeModal.title = recipe.title;
-	recipeModal.loading = true;
+	recipeModal.isLoading = true;
 	recipeModal.error = '';
 	recipeModal.recipe = null;
 	void loadRecipeDetails(recipe);
 }
 
 function closeRecipeModal(): void {
-	recipeModal.visible = false;
+	recipeModal.isVisible = false;
 	recipeModal.title = '';
-	recipeModal.loading = false;
+	recipeModal.isLoading = false;
 	recipeModal.error = '';
 	recipeModal.recipe = null;
 }
 
 function onGlobalKeyDown(event: KeyboardEvent): void {
-	if (event.key !== 'Escape' || !recipeModal.visible) {
+	if (event.key !== 'Escape' || !recipeModal.isVisible) {
 		return;
 	}
 
@@ -739,7 +738,6 @@ async function loadRecipeDetails(
 	try {
 		const response = await $fetch<RecipeDetails>('/api/recipe-details', {
 			query: {
-				link: recipe.link,
 				title: recipe.title,
 			},
 		});
@@ -751,7 +749,7 @@ async function loadRecipeDetails(
 				? String((error as { statusMessage?: string }).statusMessage)
 				: 'Could not load recipe details.';
 	} finally {
-		recipeModal.loading = false;
+		recipeModal.isLoading = false;
 	}
 }
 
@@ -872,9 +870,9 @@ function startDragging(event: PointerEvent, nodeId: string): void {
 		return;
 	}
 
-	dragState.active = true;
+	dragState.isActive = true;
 	dragState.nodeId = nodeId;
-	dragState.moved = false;
+	dragState.isMoved = false;
 	const p = getSvgPoint(event);
 	dragState.startX = p.x;
 	dragState.startY = p.y;
@@ -883,7 +881,7 @@ function startDragging(event: PointerEvent, nodeId: string): void {
 }
 
 function onPointerMove(event: PointerEvent): void {
-	if (!dragState.active) {
+	if (!dragState.isActive) {
 		return;
 	}
 	const node = renderedNodes.value.find((item) => item.id === dragState.nodeId);
@@ -897,14 +895,14 @@ function onPointerMove(event: PointerEvent): void {
 		p.y - dragState.startY,
 	);
 	if (movedDistance > 4) {
-		dragState.moved = true;
+		dragState.isMoved = true;
 	}
 	node.fx = clamp(p.x, 32, WIDTH - 32);
 	node.fy = clamp(p.y, 32, HEIGHT - 32);
 }
 
 function stopDragging(): void {
-	if (!dragState.active) {
+	if (!dragState.isActive) {
 		return;
 	}
 
@@ -914,7 +912,7 @@ function stopDragging(): void {
 		node.fy = null;
 	}
 
-	dragState.active = false;
+	dragState.isActive = false;
 	dragState.nodeId = '';
 }
 
@@ -926,16 +924,16 @@ function cancelHoverClose(): void {
 }
 
 function hideHoverCard(): void {
-	hoverCard.visible = false;
+	hoverCard.isVisible = false;
 	hoverCard.nodeId = '';
-	hoverState.overNode = false;
-	hoverState.overCard = false;
+	hoverState.isOverNode = false;
+	hoverState.isOverCard = false;
 }
 
 function scheduleHoverClose(): void {
 	cancelHoverClose();
 	hoverCloseTimer = setTimeout(() => {
-		if (!hoverState.overNode && !hoverState.overCard) {
+		if (!hoverState.isOverNode && !hoverState.isOverCard) {
 			hideHoverCard();
 		}
 	}, 90);
@@ -1001,11 +999,11 @@ async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
 	const cacheKey = getRecipeCacheKey(nodeId);
 	if (recipeTitlesByNodeId[cacheKey]) {
 		hoverCard.titles = recipeTitlesByNodeId[cacheKey];
-		hoverCard.loading = false;
+		hoverCard.isLoading = false;
 		return;
 	}
 
-	hoverCard.loading = true;
+	hoverCard.isLoading = true;
 	try {
 		const response = await $fetch<IngredientRecipesResponse>(
 			'/api/ingredient-recipes',
@@ -1020,7 +1018,7 @@ async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
 		recipeTitlesByNodeId[cacheKey] = [];
 		hoverCard.titles = [];
 	} finally {
-		hoverCard.loading = false;
+		hoverCard.isLoading = false;
 	}
 }
 
@@ -1031,13 +1029,13 @@ async function onNodePointerEnter(nodeId: string): Promise<void> {
 	}
 
 	cancelHoverClose();
-	hoverState.overNode = true;
+	hoverState.isOverNode = true;
 	hoverCard.nodeId = nodeId;
 	hoverCard.label = node.label;
-	hoverCard.visible = true;
+	hoverCard.isVisible = true;
 	const cacheKey = getRecipeCacheKey(nodeId);
 	hoverCard.titles = recipeTitlesByNodeId[cacheKey] ?? [];
-	hoverCard.loading = !recipeTitlesByNodeId[cacheKey];
+	hoverCard.isLoading = !recipeTitlesByNodeId[cacheKey];
 	updateHoverCardPosition(nodeId);
 	await nextTick();
 	updateHoverCardPosition(nodeId);
@@ -1045,9 +1043,9 @@ async function onNodePointerEnter(nodeId: string): Promise<void> {
 }
 
 function onNodePointerLeave(event: PointerEvent): void {
-	hoverState.overNode = false;
+	hoverState.isOverNode = false;
 	if (eventTargetInsideHoverCard(event.relatedTarget)) {
-		hoverState.overCard = true;
+		hoverState.isOverCard = true;
 		cancelHoverClose();
 		return;
 	}
@@ -1055,12 +1053,12 @@ function onNodePointerLeave(event: PointerEvent): void {
 }
 
 function onHoverCardPointerEnter(): void {
-	hoverState.overCard = true;
+	hoverState.isOverCard = true;
 	cancelHoverClose();
 }
 
 function onHoverCardPointerLeave(event: PointerEvent): void {
-	hoverState.overCard = false;
+	hoverState.isOverCard = false;
 	if (eventTargetInsideHoverCard(event.relatedTarget)) {
 		return;
 	}
@@ -1068,7 +1066,7 @@ function onHoverCardPointerLeave(event: PointerEvent): void {
 }
 
 function onNodePointerUp(nodeId: string): void {
-	if (dragState.active && dragState.nodeId === nodeId && !dragState.moved) {
+	if (dragState.isActive && dragState.nodeId === nodeId && !dragState.isMoved) {
 		const node = renderedNodes.value.find((item) => item.id === nodeId);
 		if (node) {
 			query.value = node.label;
@@ -1088,7 +1086,7 @@ watch(activeTab, () => {
 });
 
 watch(
-	() => recipeModal.visible,
+	() => recipeModal.isVisible,
 	(visible) => {
 		if (visible) {
 			document.body.style.overflow = 'hidden';
@@ -1105,7 +1103,7 @@ onMounted(() => {
 });
 
 watchEffect(() => {
-	if (!hoverCard.visible || !hoverCard.nodeId) {
+	if (!hoverCard.isVisible || !hoverCard.nodeId) {
 		return;
 	}
 	updateHoverCardPosition(hoverCard.nodeId);
