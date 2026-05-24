@@ -9,6 +9,7 @@ type IngredientDoc = {
 type RecipeDoc = {
 	_id: ObjectId;
 	title?: string;
+	link?: string;
 	ingredients?: Array<{
 		ingedientId?: ObjectId;
 	}>;
@@ -18,19 +19,26 @@ type NeighborAgg = {
 	_id: ObjectId;
 	count: number;
 	recipeTitle: string;
+	recipeLink: string;
 };
 
 type IngredientNeighbor = {
 	id: ObjectId;
 	name: string;
 	recipeTitle: string;
+	recipeLink: string;
 	count: number;
+};
+
+type PathRecipeStep = {
+	title: string;
+	link: string;
 };
 
 type PathState = {
 	ingredientIds: ObjectId[];
 	ingredientNames: string[];
-	recipeChain: string[];
+	recipeChain: PathRecipeStep[];
 };
 
 function normalizeIngredientName(value: string): string {
@@ -132,6 +140,7 @@ export default defineEventHandler(async (event) => {
 				{
 					$project: {
 						title: 1,
+						link: 1,
 						ingredients: 1,
 					},
 				},
@@ -146,6 +155,7 @@ export default defineEventHandler(async (event) => {
 						_id: '$ingredients.ingedientId',
 						count: { $sum: 1 },
 						recipeTitle: { $min: '$title' },
+						recipeLink: { $min: '$link' },
 					},
 				},
 				{ $sort: { count: -1 } },
@@ -176,6 +186,7 @@ export default defineEventHandler(async (event) => {
 					id: pair._id,
 					name,
 					recipeTitle: pair.recipeTitle?.trim() || '(untitled recipe)',
+					recipeLink: pair.recipeLink?.trim() || '',
 					count: pair.count,
 				};
 			})
@@ -201,7 +212,7 @@ export default defineEventHandler(async (event) => {
 	const seenRecipeChains = new Set<string>();
 	const foundPaths: Array<{
 		ingredientChain: string[];
-		recipeChain: string[];
+		recipeChain: PathRecipeStep[];
 		hops: number;
 	}> = [];
 
@@ -216,7 +227,9 @@ export default defineEventHandler(async (event) => {
 			state.ingredientIds[state.ingredientIds.length - 1];
 
 		if (String(currentIngredientId) === String(toIngredient._id)) {
-			const chainKey = state.recipeChain.join('\u0000');
+			const chainKey = state.recipeChain
+				.map((step) => step.title)
+				.join('\u0000');
 			if (!seenRecipeChains.has(chainKey)) {
 				seenRecipeChains.add(chainKey);
 				foundPaths.push({
@@ -245,7 +258,13 @@ export default defineEventHandler(async (event) => {
 			queue.push({
 				ingredientIds: [...state.ingredientIds, neighbor.id],
 				ingredientNames: [...state.ingredientNames, neighbor.name],
-				recipeChain: [...state.recipeChain, neighbor.recipeTitle],
+				recipeChain: [
+					...state.recipeChain,
+					{
+						title: neighbor.recipeTitle,
+						link: neighbor.recipeLink,
+					},
+				],
 			});
 		}
 	}

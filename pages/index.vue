@@ -3,11 +3,12 @@
 		<section class="shell">
 			<header class="hero">
 				<p class="eyebrow">Flavor Network Explorer</p>
-				<h1>Gastrograph</h1>
+				<h1>GastroGraph</h1>
+				<!-- 				
 				<p class="subtitle">
 					Pick an ingredient to map which other ingredients most often appear
 					with it across recipes.
-				</p>
+				</p> -->
 			</header>
 
 			<section class="tabs" role="tablist" aria-label="Gastrograph views">
@@ -36,34 +37,26 @@
 			<template v-if="activeTab === 'search'">
 				<section class="searchPanel">
 					<form class="searchForm" @submit.prevent="submitIngredient">
-						<label for="ingredient-input">Ingredient</label>
 						<div class="inputRow">
-							<input
-								id="ingredient-input"
-								ref="inputRef"
+							<IngredientAutocomplete
+								class="searchIngredientField"
+								input-id="ingredient-input"
+								label="Ingredient"
 								v-model="query"
-								type="text"
-								autocomplete="off"
 								placeholder="Try garlic, butter, tomato..."
-								@focus="onInputFocus"
-								@keydown="onInputKeydown"
+								:disabled="isGraphLoading"
+								:blur-on-select="true"
+								@select="onSearchIngredientSelected"
+								@submit="submitIngredient"
 							/>
-							<button type="submit" :disabled="isGraphLoading">OK</button>
-						</div>
-
-						<ul v-if="showSuggestions" class="suggestions" role="listbox">
-							<li
-								v-for="(item, index) in suggestions"
-								:key="item.name"
-								class="suggestion"
-								:class="{ active: index === activeSuggestionIndex }"
-								role="option"
-								@click="selectSuggestion(item.name)"
+							<button
+								type="submit"
+								class="primaryButton"
+								:disabled="isGraphLoading"
 							>
-								<span>{{ item.name }}</span>
-								<small>{{ item.type }}</small>
-							</li>
-						</ul>
+								OK
+							</button>
+						</div>
 					</form>
 
 					<p v-if="hintText" class="hint">{{ hintText }}</p>
@@ -100,7 +93,13 @@
 								:key="recipe.title"
 								:class="{ pairedRecipe: recipe.containsCurrentIngredient }"
 							>
-								<span>{{ recipe.title }}</span>
+								<button
+									type="button"
+									class="recipeButton"
+									@click="openRecipeModal(recipe)"
+								>
+									{{ recipe.title }}
+								</button>
 								<small v-if="recipe.containsCurrentIngredient">Both</small>
 							</li>
 						</ul>
@@ -171,51 +170,43 @@
 				<section class="searchPanel">
 					<form class="searchForm" @submit.prevent="submitPathSearch">
 						<div class="pathGrid">
-							<div>
-								<label for="path-from-input">From ingredient</label>
-								<input
-									id="path-from-input"
-									v-model="pathFromQuery"
-									type="text"
-									autocomplete="off"
-									list="path-from-options"
-									placeholder="Try butter"
-									@focus="void fetchPathSuggestions('from', pathFromQuery)"
-									@input="void fetchPathSuggestions('from', pathFromQuery)"
-								/>
-								<datalist id="path-from-options">
-									<option
-										v-for="item in pathFromSuggestions"
-										:key="`from-${item.name}`"
-										:value="item.name"
-									/>
-								</datalist>
-							</div>
+							<IngredientAutocomplete
+								input-id="path-from-input"
+								label="From ingredient"
+								v-model="pathFromQuery"
+								placeholder="Try butter"
+								:tab-index="1"
+								input-width="200px"
+								:disabled="isPathLoading"
+								:show-type="false"
+								@select="onPathIngredientSelected('from')"
+								@submit="submitPathSearch"
+							/>
 
-							<div>
-								<label for="path-to-input">To ingredient</label>
-								<input
-									id="path-to-input"
-									v-model="pathToQuery"
-									type="text"
-									autocomplete="off"
-									list="path-to-options"
-									placeholder="Try parsley"
-									@focus="void fetchPathSuggestions('to', pathToQuery)"
-									@input="void fetchPathSuggestions('to', pathToQuery)"
-								/>
-								<datalist id="path-to-options">
-									<option
-										v-for="item in pathToSuggestions"
-										:key="`to-${item.name}`"
-										:value="item.name"
-									/>
-								</datalist>
-							</div>
-						</div>
+							<IngredientAutocomplete
+								input-id="path-to-input"
+								label="To ingredient"
+								v-model="pathToQuery"
+								placeholder="Try parsley"
+								:tab-index="2"
+								input-width="200px"
+								:disabled="isPathLoading"
+								:show-type="false"
+								@select="onPathIngredientSelected('to')"
+								@submit="submitPathSearch"
+							/>
 
-						<div class="pathActions">
-							<button type="submit" :disabled="isPathLoading">OK</button>
+							<div class="pathActions">
+								<button
+									type="submit"
+									tabindex="3"
+									class="primaryButton"
+									:disabled="isPathLoading"
+								>
+									<span v-if="!isPathLoading">OK</span>
+									<span v-else class="pathSpinner" aria-hidden="true"></span>
+								</button>
+							</div>
 						</div>
 					</form>
 
@@ -224,7 +215,7 @@
 				</section>
 
 				<section class="graphPanel pathPanel">
-					<div class="legend">
+					<div v-if="!pathErrorText" class="legend">
 						<p>
 							Showing recipe chains from
 							<strong>{{ pathFromQuery || '...' }}</strong>
@@ -236,20 +227,27 @@
 					<ol v-if="pathResults.length > 0" class="pathResults">
 						<li
 							v-for="(path, index) in pathResults"
-							:key="`${path.recipeChain.join('-')}-${index}`"
+							:key="`${path.recipeChain.map((recipe) => recipe.title).join('-')}-${index}`"
 						>
-							<p class="pathHeading">Path {{ index + 1 }}</p>
-							<p class="pathIngredients">
-								{{ path.ingredientChain.join(' -> ') }}
-							</p>
-							<ul>
+							<ol class="pathSteps">
 								<li
 									v-for="(recipe, recipeIndex) in path.recipeChain"
-									:key="`${recipe}-${recipeIndex}`"
+									:key="`${recipe.title}-${recipeIndex}`"
 								>
-									{{ recipe }}
+									<strong>
+										<button
+											type="button"
+											class="recipeButton"
+											@click="openRecipeModal(recipe)"
+										>
+											{{ recipe.title }}
+										</button>
+									</strong>
+									uses
+									{{ path.ingredientChain[recipeIndex] }} and
+									{{ path.ingredientChain[recipeIndex + 1] }}
 								</li>
-							</ul>
+							</ol>
 						</li>
 					</ol>
 					<p v-else class="pathEmpty">
@@ -257,16 +255,69 @@
 					</p>
 				</section>
 			</template>
+
+			<Teleport to="body">
+				<div
+					v-if="recipeModal.visible"
+					class="recipeModalOverlay"
+					@click.self="closeRecipeModal"
+				>
+					<section
+						class="recipeModal"
+						role="dialog"
+						aria-modal="true"
+						:aria-labelledby="recipeModalTitleId"
+					>
+						<header class="recipeModalHeader">
+							<div>
+								<p class="recipeModalEyebrow">Recipe details</p>
+								<h2 :id="recipeModalTitleId">{{ recipeModal.title }}</h2>
+							</div>
+							<button
+								type="button"
+								class="recipeModalClose"
+								@click="closeRecipeModal"
+							>
+								Close
+							</button>
+						</header>
+
+						<p v-if="recipeModal.loading" class="recipeModalState">
+							Loading recipe...
+						</p>
+						<p
+							v-else-if="recipeModal.error"
+							class="recipeModalState recipeModalError"
+						>
+							{{ recipeModal.error }}
+						</p>
+						<template v-else-if="recipeModal.recipe">
+							<ul class="recipeIngredients">
+								<li
+									v-for="(ingredient, index) in recipeModal.recipe.ingredients"
+									:key="`${ingredient.ingredient}-${index}`"
+								>
+									{{ ingredient.ingredient }}
+								</li>
+							</ul>
+
+							<ol class="recipeDirections">
+								<li
+									v-for="(direction, index) in recipeModal.recipe.directions"
+									:key="`${index}-${direction}`"
+								>
+									{{ direction }}
+								</li>
+							</ol>
+						</template>
+					</section>
+				</div>
+			</Teleport>
 		</section>
 	</main>
 </template>
 
 <script setup lang="ts">
-type IngredientSuggestion = {
-	name: string;
-	type: string;
-};
-
 type GraphApiNode = {
 	id: string;
 	label: string;
@@ -286,15 +337,49 @@ type IngredientRecipesResponse = {
 	titles: RecipeListItem[];
 };
 
+type RecipeDetails = {
+	title: string;
+	link: string;
+	ingredients: Array<{
+		ingredient: string;
+	}>;
+	directions: string[];
+};
+
 type RecipeListItem = {
 	title: string;
+	link: string;
 	containsCurrentIngredient: boolean;
 };
 
+function dedupeRecipeTitles(titles: RecipeListItem[]): RecipeListItem[] {
+	const byTitle = new Map<string, RecipeListItem>();
+
+	for (const recipe of titles) {
+		const key = recipe.title.trim().toLowerCase();
+		const existing = byTitle.get(key);
+		if (!existing) {
+			byTitle.set(key, { ...recipe });
+			continue;
+		}
+
+		if (recipe.containsCurrentIngredient) {
+			existing.containsCurrentIngredient = true;
+		}
+	}
+
+	return Array.from(byTitle.values());
+}
+
 type IngredientPath = {
 	ingredientChain: string[];
-	recipeChain: string[];
+	recipeChain: RecipePathItem[];
 	hops: number;
+};
+
+type RecipePathItem = {
+	title: string;
+	link: string;
 };
 
 type IngredientPathResponse = {
@@ -325,13 +410,9 @@ const HEIGHT = 640;
 const activeTab = ref<'search' | 'path'>('search');
 
 const query = ref('');
-const inputRef = ref<HTMLInputElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
 const hoverCardRef = ref<HTMLDivElement | null>(null);
 
-const suggestions = ref<IngredientSuggestion[]>([]);
-const activeSuggestionIndex = ref(0);
-const isSuggestionLoading = ref(false);
 const isGraphLoading = ref(false);
 
 const centerName = ref('');
@@ -341,12 +422,26 @@ const errorText = ref('');
 
 const pathFromQuery = ref('');
 const pathToQuery = ref('');
-const pathFromSuggestions = ref<IngredientSuggestion[]>([]);
-const pathToSuggestions = ref<IngredientSuggestion[]>([]);
 const pathResults = ref<IngredientPath[]>([]);
 const pathHintText = ref('');
 const pathErrorText = ref('');
 const isPathLoading = ref(false);
+
+const recipeModal = reactive<{
+	visible: boolean;
+	title: string;
+	loading: boolean;
+	error: string;
+	recipe: RecipeDetails | null;
+}>({
+	visible: false,
+	title: '',
+	loading: false,
+	error: '',
+	recipe: null,
+});
+
+const recipeModalTitleId = 'recipe-modal-title';
 
 const renderedNodes = ref<RenderNode[]>([]);
 const renderedLinks = ref<
@@ -369,15 +464,7 @@ const nodeById = computed(() => {
 	return map;
 });
 
-const showSuggestions = computed(
-	() =>
-		suggestions.value.length > 0 &&
-		query.value.trim().length > 0 &&
-		document.activeElement === inputRef.value,
-);
-
 let simulationFrame = 0;
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
 const dragState = reactive({
 	nodeId: '',
@@ -411,28 +498,58 @@ function getRecipeCacheKey(nodeId: string): string {
 const typeColorMap: Record<string, string> = {
 	beef: '#8c2f39',
 	fish: '#2a6f97',
+	seafood: '#2a6f97',
 	poultry: '#bc6c25',
+	chicken: '#bc6c25',
 	pork: '#ae2012',
+	meat: '#ae2012',
 	vegetable: '#2d6a4f',
+	veggie: '#2d6a4f',
 	fruit: '#d00000',
 	cheeses: '#dda15e',
+	cheese: '#dda15e',
 	spice: '#9c6644',
+	seasoning: '#9c6644',
 	dairy: '#b08968',
 	grain: '#b5838d',
+	grains: '#b5838d',
 	herb: '#386641',
+	herbs: '#386641',
 	oil: '#6b705c',
 	sweetener: '#ff6f61',
+	sugar: '#ff6f61',
 	condiment: '#5f0f40',
 	legume: '#4361ee',
+	bean: '#4361ee',
 	nut: '#7f5539',
 	other: '#6c757d',
 };
 
-function pickNodeColor(type: string, isCenter: boolean): string {
-	if (isCenter) {
-		return '#101820';
+const typeAliasMap: Record<string, string> = {
+	veggies: 'vegetable',
+	vegetables: 'vegetable',
+	fruits: 'fruit',
+	spices: 'spice',
+	seasonings: 'spice',
+	cheeses: 'cheeses',
+	grains: 'grain',
+	herbs: 'herb',
+	legumes: 'legume',
+	nuts: 'nut',
+};
+
+function normalizeIngredientType(type: string): string {
+	const normalized = type.trim().toLowerCase();
+	if (!normalized) {
+		return 'other';
 	}
-	return typeColorMap[type] ?? typeColorMap.other;
+
+	return typeAliasMap[normalized] ?? normalized;
+}
+
+function pickNodeColor(type: string, _isCenter: boolean): string {
+	const normalizedType = normalizeIngredientType(type);
+	return typeColorMap[normalizedType] ?? typeColorMap.other;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -581,103 +698,51 @@ function runSimulation(rawLinks: GraphApiLink[]): void {
 	tick();
 }
 
-async function fetchSuggestions(input: string): Promise<void> {
-	if (!input.trim()) {
-		suggestions.value = [];
-		return;
-	}
-
-	isSuggestionLoading.value = true;
-	try {
-		const response = await $fetch<{ items: IngredientSuggestion[] }>(
-			'/api/ingredients',
-			{
-				query: { q: input.trim() },
-			},
-		);
-		suggestions.value = response.items;
-		activeSuggestionIndex.value = 0;
-	} catch {
-		suggestions.value = [];
-	} finally {
-		isSuggestionLoading.value = false;
-	}
-}
-
-async function fetchPathSuggestions(
-	field: 'from' | 'to',
-	input: string,
-): Promise<void> {
-	if (!input.trim()) {
-		if (field === 'from') {
-			pathFromSuggestions.value = [];
-		} else {
-			pathToSuggestions.value = [];
-		}
-		return;
-	}
-
-	try {
-		const response = await $fetch<{ items: IngredientSuggestion[] }>(
-			'/api/ingredients',
-			{
-				query: { q: input.trim() },
-			},
-		);
-
-		if (field === 'from') {
-			pathFromSuggestions.value = response.items;
-		} else {
-			pathToSuggestions.value = response.items;
-		}
-	} catch {
-		if (field === 'from') {
-			pathFromSuggestions.value = [];
-		} else {
-			pathToSuggestions.value = [];
-		}
-	}
-}
-
-function selectSuggestion(name: string): void {
-	query.value = name;
-	suggestions.value = [];
+function onSearchIngredientSelected(name: string): void {
 	errorText.value = '';
 	hintText.value = `Selected ${name}`;
-	inputRef.value?.blur();
 }
 
-function onInputFocus(): void {
-	if (query.value.trim()) {
-		void fetchSuggestions(query.value);
-	}
+function onPathIngredientSelected(_field: 'from' | 'to'): void {
+	pathErrorText.value = '';
 }
 
-function onInputKeydown(event: KeyboardEvent): void {
-	if (event.key === 'ArrowDown' && suggestions.value.length > 0) {
-		event.preventDefault();
-		activeSuggestionIndex.value =
-			(activeSuggestionIndex.value + 1) % suggestions.value.length;
-		return;
-	}
+function openRecipeModal(recipe: RecipeListItem | RecipePathItem): void {
+	recipeModal.visible = true;
+	recipeModal.title = recipe.title;
+	recipeModal.loading = true;
+	recipeModal.error = '';
+	recipeModal.recipe = null;
+	void loadRecipeDetails(recipe);
+}
 
-	if (event.key === 'ArrowUp' && suggestions.value.length > 0) {
-		event.preventDefault();
-		activeSuggestionIndex.value =
-			(activeSuggestionIndex.value - 1 + suggestions.value.length) %
-			suggestions.value.length;
-		return;
-	}
+function closeRecipeModal(): void {
+	recipeModal.visible = false;
+	recipeModal.title = '';
+	recipeModal.loading = false;
+	recipeModal.error = '';
+	recipeModal.recipe = null;
+}
 
-	if (event.key === 'Enter') {
-		event.preventDefault();
-		if (
-			showSuggestions.value &&
-			suggestions.value[activeSuggestionIndex.value]
-		) {
-			selectSuggestion(suggestions.value[activeSuggestionIndex.value].name);
-		}
-		void submitIngredient();
+async function loadRecipeDetails(
+	recipe: RecipeListItem | RecipePathItem,
+): Promise<void> {
+	try {
+		const response = await $fetch<RecipeDetails>('/api/recipe-details', {
+			query: {
+				link: recipe.link,
+				title: recipe.title,
+			},
+		});
+		recipeModal.recipe = response;
+		recipeModal.title = response.title || recipe.title;
+	} catch (error: unknown) {
+		recipeModal.error =
+			typeof error === 'object' && error && 'statusMessage' in error
+				? String((error as { statusMessage?: string }).statusMessage)
+				: 'Could not load recipe details.';
+	} finally {
+		recipeModal.loading = false;
 	}
 }
 
@@ -714,7 +779,6 @@ async function submitIngredient(): Promise<void> {
 			response.links.length > 0
 				? `${response.center.name} appears in ${response.center.recipeCount} recipes with ${response.links.length} linked ingredients.`
 				: `${response.center.name} was found, but no linked ingredients were available in recipes.`;
-		suggestions.value = [];
 	} catch (error: unknown) {
 		const message =
 			typeof error === 'object' && error && 'statusMessage' in error
@@ -940,8 +1004,9 @@ async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
 				query: { ingredientId: nodeId, currentIngredientId: centerId.value },
 			},
 		);
-		recipeTitlesByNodeId[cacheKey] = response.titles;
-		hoverCard.titles = response.titles;
+		const dedupedTitles = dedupeRecipeTitles(response.titles);
+		recipeTitlesByNodeId[cacheKey] = dedupedTitles;
+		hoverCard.titles = dedupedTitles;
 	} catch {
 		recipeTitlesByNodeId[cacheKey] = [];
 		hoverCard.titles = [];
@@ -1004,25 +1069,24 @@ function onNodePointerUp(nodeId: string): void {
 	stopDragging();
 }
 
+watch(query, () => {
+	errorText.value = '';
+	hintText.value = '';
+});
+
+watch(activeTab, () => {
+	closeRecipeModal();
+});
+
 watch(
-	query,
-	(value) => {
-		errorText.value = '';
-		hintText.value = '';
-
-		if (searchDebounceTimer) {
-			clearTimeout(searchDebounceTimer);
+	() => recipeModal.visible,
+	(visible) => {
+		if (visible) {
+			document.body.style.overflow = 'hidden';
+		} else {
+			document.body.style.overflow = '';
 		}
-
-		searchDebounceTimer = setTimeout(() => {
-			if (document.activeElement !== inputRef.value) {
-				suggestions.value = [];
-				return;
-			}
-			void fetchSuggestions(value);
-		}, 140);
 	},
-	{ flush: 'post' },
 );
 
 onMounted(() => {
@@ -1038,9 +1102,7 @@ watchEffect(() => {
 });
 
 onBeforeUnmount(() => {
-	if (searchDebounceTimer) {
-		clearTimeout(searchDebounceTimer);
-	}
+	document.body.style.overflow = '';
 	if (hoverCloseTimer) {
 		clearTimeout(hoverCloseTimer);
 	}
@@ -1071,32 +1133,38 @@ onBeforeUnmount(() => {
 
 .tabs {
 	display: flex;
-	gap: 0.55rem;
+	gap: 0.35rem;
+	align-items: flex-end;
+	padding: 0 0.15rem;
+	border-bottom: 1px solid rgba(40, 54, 24, 0.28);
 }
 
 .tabButton {
-	padding: 0.55rem 0.95rem;
-	border-radius: 999px;
-	border: 1px solid rgba(40, 54, 24, 0.26);
-	background: rgba(255, 255, 255, 0.75);
+	position: relative;
+	padding: 0.58rem 1rem;
+	border: 1px solid transparent;
+	border-bottom: none;
+	border-radius: 10px 10px 0 0;
+	background: transparent;
 	color: #283618;
 	font-size: 0.9rem;
 	font-weight: 700;
 	cursor: pointer;
 	transition:
 		background 0.16s ease,
-		transform 0.14s ease,
+		color 0.16s ease,
 		box-shadow 0.16s ease;
 }
 
 .tabButton.active {
-	background: linear-gradient(140deg, #606c38 0%, #283618 100%);
-	color: #f8fafc;
-	box-shadow: 0 8px 18px rgba(40, 54, 24, 0.24);
+	background: rgba(255, 255, 255, 0.86);
+	color: #243213;
+	border-color: rgba(40, 54, 24, 0.32);
+	box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.86) inset;
 }
 
 .tabButton:hover {
-	transform: translateY(-1px);
+	background: rgba(255, 255, 255, 0.45);
 }
 
 .hero {
@@ -1140,52 +1208,48 @@ h1 {
 	box-shadow: 0 12px 28px rgba(41, 35, 26, 0.09);
 }
 
-.searchForm label {
-	display: block;
-	font-size: 0.86rem;
-	font-weight: 700;
-	margin-bottom: 0.4rem;
-	color: #344e41;
-}
-
 .pathGrid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(2, minmax(120px, max-content)) auto;
 	gap: 0.7rem;
+	justify-content: start;
+	align-items: end;
 }
 
 .pathActions {
-	margin-top: 0.7rem;
+	margin-top: 0;
 	display: flex;
-	justify-content: flex-end;
+	justify-content: flex-start;
 }
 
 .inputRow {
 	display: grid;
-	grid-template-columns: 1fr auto;
+	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 0.55rem;
+	align-items: end;
 }
 
-input {
+.inputRow > * {
+	min-width: 0;
+}
+
+.searchIngredientField {
 	width: 100%;
-	padding: 0.8rem 0.95rem;
-	border-radius: 11px;
-	border: 1px solid #adb5bd;
-	font-size: 1rem;
-	background: #fff;
-	color: #212529;
+	min-width: 0;
 }
 
-input:focus {
-	outline: none;
-	border-color: #588157;
-	box-shadow: 0 0 0 3px rgba(88, 129, 87, 0.2);
+.inputRow :deep(.ingredientField) {
+	min-width: 0;
 }
 
-button {
+.searchIngredientField :deep(input) {
+	width: 100%;
+}
+
+.primaryButton {
 	border: none;
 	border-radius: 11px;
-	padding: 0 1.1rem;
+	padding: 0.75rem 1.1rem;
 	font-size: 1rem;
 	font-weight: 700;
 	color: #f7f7f7;
@@ -1194,45 +1258,39 @@ button {
 	transition: transform 0.14s ease;
 }
 
-button:hover {
+.primaryButton:hover {
 	transform: translateY(-1px);
 }
 
-button:disabled {
+.primaryButton:disabled {
 	cursor: wait;
 	opacity: 0.72;
 	transform: none;
 }
 
-.suggestions {
-	list-style: none;
-	margin: 0.5rem 0 0;
-	padding: 0.4rem;
-	border: 1px solid rgba(56, 102, 65, 0.24);
-	border-radius: 10px;
-	background: #fffdf8;
-	max-height: 16rem;
-	overflow-y: auto;
-}
-
-.suggestion {
-	display: flex;
-	justify-content: space-between;
+.pathActions .primaryButton {
+	display: inline-flex;
 	align-items: center;
-	padding: 0.45rem 0.55rem;
-	border-radius: 8px;
-	cursor: pointer;
-	text-transform: capitalize;
+	justify-content: center;
+	width: 72px;
+	height: 46px;
+	padding: 0;
+	position: relative;
 }
 
-.suggestion small {
-	text-transform: lowercase;
-	opacity: 0.72;
+.pathSpinner {
+	width: 0.95rem;
+	height: 0.95rem;
+	border-radius: 999px;
+	border: 2px solid rgba(247, 247, 247, 0.28);
+	border-top-color: #f7f7f7;
+	animation: pathButtonSpin 0.7s linear infinite;
 }
 
-.suggestion.active,
-.suggestion:hover {
-	background: #e9edc9;
+@keyframes pathButtonSpin {
+	to {
+		transform: rotate(360deg);
+	}
 }
 
 .hint,
@@ -1265,7 +1323,8 @@ button:disabled {
 
 .pathResults {
 	margin: 0;
-	padding: 0 0 0 1.1rem;
+	padding: 0;
+	list-style: none;
 	display: grid;
 	gap: 0.75rem;
 }
@@ -1277,23 +1336,16 @@ button:disabled {
 	padding: 0.65rem 0.75rem;
 }
 
-.pathHeading {
-	margin: 0 0 0.2rem;
-	font-weight: 700;
-	color: #344e41;
-}
-
-.pathIngredients {
-	margin: 0 0 0.45rem;
-	font-size: 0.88rem;
-	color: #495057;
-}
-
-.pathResults ul {
+.pathSteps {
 	margin: 0;
 	padding-left: 1rem;
 	display: grid;
 	gap: 0.2rem;
+}
+
+.pathSteps > li {
+	margin: 0;
+	color: #495057;
 }
 
 .pathEmpty {
@@ -1348,13 +1400,24 @@ button:disabled {
 	border-radius: 8px;
 }
 
-.hoverCard li small {
-	flex-shrink: 0;
-	font-size: 0.7rem;
-	font-weight: 700;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
-	color: #6b705c;
+.recipeButton {
+	flex: 1;
+	min-width: 0;
+	color: inherit;
+	font: inherit;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	text-align: left;
+	cursor: pointer;
+}
+
+.recipeButton:hover {
+	text-decoration: underline;
+}
+
+.pathSteps .recipeButton {
+	display: inline;
 }
 
 .hoverCard li.pairedRecipe {
@@ -1451,6 +1514,99 @@ line {
 	pointer-events: none;
 }
 
+.recipeModalOverlay {
+	position: fixed;
+	inset: 0;
+	z-index: 20;
+	display: grid;
+	place-items: center;
+	padding: 1rem;
+	background: rgba(20, 24, 16, 0.55);
+	backdrop-filter: blur(6px);
+}
+
+.recipeModal {
+	width: min(760px, 100%);
+	max-height: min(86vh, 900px);
+	overflow: auto;
+	background: #fffdf7;
+	border-radius: 18px;
+	border: 1px solid rgba(40, 54, 24, 0.18);
+	box-shadow: 0 24px 60px rgba(17, 17, 17, 0.28);
+	padding: 1rem 1rem 1.1rem;
+	color: #1d1d1d;
+}
+
+.recipeModalHeader {
+	display: flex;
+	justify-content: space-between;
+	gap: 1rem;
+	align-items: start;
+	margin-bottom: 0.9rem;
+}
+
+.recipeModalEyebrow {
+	margin: 0 0 0.15rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	font-size: 0.72rem;
+	font-weight: 700;
+	color: #6b705c;
+}
+
+.recipeModal h2 {
+	margin: 0;
+	font-family: 'Palatino Linotype', Palatino, 'Book Antiqua', serif;
+	font-size: clamp(1.5rem, 4vw, 2.1rem);
+	line-height: 1.06;
+	color: #283618;
+}
+
+.recipeModalClose {
+	border: 1px solid rgba(40, 54, 24, 0.18);
+	border-radius: 999px;
+	background: #fff;
+	color: #283618;
+	font: inherit;
+	font-weight: 700;
+	padding: 0.52rem 0.9rem;
+	cursor: pointer;
+}
+
+.recipeModalState {
+	margin: 0;
+	font-size: 0.95rem;
+	color: #495057;
+}
+
+.recipeModalError {
+	color: #9d0208;
+	font-weight: 600;
+}
+
+.recipeIngredients,
+.recipeDirections {
+	margin: 0.85rem 0 0;
+	padding-left: 1.2rem;
+	display: grid;
+	gap: 0.35rem;
+}
+
+.recipeIngredients {
+	list-style: disc;
+}
+
+.recipeDirections {
+	list-style: decimal;
+	gap: 0.5rem;
+}
+
+.recipeIngredients li,
+.recipeDirections li {
+	line-height: 1.45;
+	color: #263238;
+}
+
 @media (max-width: 760px) {
 	.page {
 		padding: 1.1rem 0.65rem 2.2rem;
@@ -1468,11 +1624,15 @@ line {
 		grid-template-columns: 1fr;
 	}
 
+	.recipeModalHeader {
+		flex-direction: column;
+	}
+
 	.inputRow {
 		grid-template-columns: 1fr;
 	}
 
-	button {
+	.primaryButton {
 		padding: 0.7rem;
 	}
 
