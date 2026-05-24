@@ -724,6 +724,15 @@ function closeRecipeModal(): void {
 	recipeModal.recipe = null;
 }
 
+function onGlobalKeyDown(event: KeyboardEvent): void {
+	if (event.key !== 'Escape' || !recipeModal.visible) {
+		return;
+	}
+
+	event.preventDefault();
+	closeRecipeModal();
+}
+
 async function loadRecipeDetails(
 	recipe: RecipeListItem | RecipePathItem,
 ): Promise<void> {
@@ -1090,6 +1099,7 @@ watch(
 );
 
 onMounted(() => {
+	window.addEventListener('keydown', onGlobalKeyDown);
 	hintText.value = 'Start by entering an ingredient.';
 	pathHintText.value = 'Select two ingredients and click OK.';
 });
@@ -1102,6 +1112,7 @@ watchEffect(() => {
 });
 
 onBeforeUnmount(() => {
+	window.removeEventListener('keydown', onGlobalKeyDown);
 	document.body.style.overflow = '';
 	if (hoverCloseTimer) {
 		clearTimeout(hoverCloseTimer);

@@ -18,8 +18,10 @@ type RecipeDoc = {
 type NeighborAgg = {
 	_id: ObjectId;
 	count: number;
-	recipeTitle: string;
-	recipeLink: string;
+	recipe: {
+		title?: string;
+		link?: string;
+	};
 };
 
 type IngredientNeighbor = {
@@ -151,11 +153,21 @@ export default defineEventHandler(async (event) => {
 					},
 				},
 				{
+					$sort: {
+						title: 1,
+						link: 1,
+					},
+				},
+				{
 					$group: {
 						_id: '$ingredients.ingedientId',
 						count: { $sum: 1 },
-						recipeTitle: { $min: '$title' },
-						recipeLink: { $min: '$link' },
+						recipe: {
+							$first: {
+								title: '$title',
+								link: '$link',
+							},
+						},
 					},
 				},
 				{ $sort: { count: -1 } },
@@ -185,8 +197,8 @@ export default defineEventHandler(async (event) => {
 				return {
 					id: pair._id,
 					name,
-					recipeTitle: pair.recipeTitle?.trim() || '(untitled recipe)',
-					recipeLink: pair.recipeLink?.trim() || '',
+					recipeTitle: pair.recipe.title?.trim() || '(untitled recipe)',
+					recipeLink: pair.recipe.link?.trim() || '',
 					count: pair.count,
 				};
 			})
