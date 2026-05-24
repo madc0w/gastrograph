@@ -1,0 +1,13 @@
+{
+	"name": "gastrograph",
+	"description": "Nuxt 3 app with MongoDB deployment on Heroku",
+	"env": {
+		"MONGODB_URI": {
+			"description": "MongoDB connection string"
+		},
+		"MONGODB_DB": {
+			"description": "MongoDB database name",
+			"value": "gastrograph"
+		}
+	}
+}
