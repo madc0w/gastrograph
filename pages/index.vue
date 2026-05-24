@@ -54,6 +54,30 @@
 					<p v-else>Enter an ingredient to build a graph.</p>
 				</div>
 
+				<div
+					v-if="hoverCard.visible"
+					class="hoverCard"
+					:style="{
+						left: `${hoverCard.left}px`,
+						top: `${hoverCard.top}px`,
+					}"
+				>
+					<p class="hoverTitle">{{ hoverCard.label }}</p>
+					<p v-if="hoverCard.loading" class="hoverMeta">Loading recipes...</p>
+					<p v-else class="hoverMeta">
+						{{ hoverCard.titles.length }} recipes use this ingredient
+					</p>
+					<ul v-if="!hoverCard.loading && hoverCard.titles.length > 0">
+						<li v-for="title in hoverCard.titles" :key="title">{{ title }}</li>
+					</ul>
+					<p
+						v-if="!hoverCard.loading && hoverCard.titles.length === 0"
+						class="hoverMeta"
+					>
+						No recipes found.
+					</p>
+				</div>
+
 				<svg
 					ref="svgRef"
 					class="graph"
@@ -91,6 +115,9 @@
 							:class="{ centerNode: node.isCenter }"
 							:transform="`translate(${node.x}, ${node.y})`"
 							@pointerdown="startDragging($event, node.id)"
+							@pointerup="onNodePointerUp(node.id)"
+							@pointerenter="onNodePointerEnter(node.id)"
+							@pointerleave="onNodePointerLeave"
 						>
 							<circle :r="node.isCenter ? 28 : 20" :fill="node.color" />
 							<text class="nodeLabel" :y="node.isCenter ? 44 : 36">
@@ -122,6 +149,11 @@ type GraphApiLink = {
 	source: string;
 	target: string;
 	weight: number;
+};
+
+type IngredientRecipesResponse = {
+	ingredientId: string;
+	titles: string[];
 };
 
 type RenderNode = GraphApiNode & {
@@ -183,7 +215,22 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 const dragState = reactive({
 	nodeId: '',
 	active: false,
+	moved: false,
+	startX: 0,
+	startY: 0,
 });
+
+const hoverCard = reactive({
+	visible: false,
+	nodeId: '',
+	label: '',
+	titles: [] as string[],
+	loading: false,
+	left: 0,
+	top: 0,
+});
+
+const recipeTitlesByNodeId = reactive<Record<string, string[]>>({});
 
 const typeColorMap: Record<string, string> = {
 	beef: '#8c2f39',
@@ -444,9 +491,11 @@ async function submitIngredient(): Promise<void> {
 		});
 
 		centerName.value = response.center.name;
+		query.value = response.center.name;
 		renderedNodes.value = createNodeLayout(response.nodes);
 		rebuildRenderedLinks(response.links);
 		runSimulation(response.links);
+		hoverCard.visible = false;
 
 		hintText.value =
 			response.links.length > 0
@@ -490,7 +539,10 @@ function startDragging(event: PointerEvent, nodeId: string): void {
 
 	dragState.active = true;
 	dragState.nodeId = nodeId;
+	dragState.moved = false;
 	const p = getSvgPoint(event);
+	dragState.startX = p.x;
+	dragState.startY = p.y;
 	node.fx = p.x;
 	node.fy = p.y;
 }
@@ -505,6 +557,13 @@ function onPointerMove(event: PointerEvent): void {
 	}
 
 	const p = getSvgPoint(event);
+	const movedDistance = Math.hypot(
+		p.x - dragState.startX,
+		p.y - dragState.startY,
+	);
+	if (movedDistance > 4) {
+		dragState.moved = true;
+	}
 	node.fx = clamp(p.x, 32, WIDTH - 32);
 	node.fy = clamp(p.y, 32, HEIGHT - 32);
 }
@@ -522,6 +581,93 @@ function stopDragging(): void {
 
 	dragState.active = false;
 	dragState.nodeId = '';
+}
+
+function updateHoverCardPosition(nodeId: string): void {
+	const node = renderedNodes.value.find((item) => item.id === nodeId);
+	const svg = svgRef.value;
+	if (!node || !svg) {
+		return;
+	}
+
+	const panelWidth = svg.clientWidth;
+	const panelHeight = svg.clientHeight;
+	const nodeX = (node.x / WIDTH) * panelWidth;
+	const nodeY = (node.y / HEIGHT) * panelHeight;
+
+	const estimatedWidth = 300;
+	const estimatedHeight = 260;
+	const gap = 12;
+
+	const left = clamp(
+		nodeX + gap,
+		8,
+		Math.max(8, panelWidth - estimatedWidth - 8),
+	);
+	const top = clamp(
+		nodeY - 40,
+		8,
+		Math.max(8, panelHeight - estimatedHeight - 8),
+	);
+
+	hoverCard.left = left;
+	hoverCard.top = top;
+}
+
+async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
+	if (recipeTitlesByNodeId[nodeId]) {
+		hoverCard.titles = recipeTitlesByNodeId[nodeId];
+		hoverCard.loading = false;
+		return;
+	}
+
+	hoverCard.loading = true;
+	try {
+		const response = await $fetch<IngredientRecipesResponse>(
+			'/api/ingredient-recipes',
+			{
+				query: { ingredientId: nodeId },
+			},
+		);
+		recipeTitlesByNodeId[nodeId] = response.titles;
+		hoverCard.titles = response.titles;
+	} catch {
+		recipeTitlesByNodeId[nodeId] = [];
+		hoverCard.titles = [];
+	} finally {
+		hoverCard.loading = false;
+	}
+}
+
+async function onNodePointerEnter(nodeId: string): Promise<void> {
+	const node = renderedNodes.value.find((item) => item.id === nodeId);
+	if (!node) {
+		return;
+	}
+
+	hoverCard.nodeId = nodeId;
+	hoverCard.label = node.label;
+	hoverCard.visible = true;
+	hoverCard.titles = recipeTitlesByNodeId[nodeId] ?? [];
+	hoverCard.loading = !recipeTitlesByNodeId[nodeId];
+	updateHoverCardPosition(nodeId);
+	await fetchRecipeTitlesForNode(nodeId);
+}
+
+function onNodePointerLeave(): void {
+	hoverCard.visible = false;
+	hoverCard.nodeId = '';
+}
+
+function onNodePointerUp(nodeId: string): void {
+	if (dragState.active && dragState.nodeId === nodeId && !dragState.moved) {
+		const node = renderedNodes.value.find((item) => item.id === nodeId);
+		if (node) {
+			query.value = node.label;
+			void submitIngredient();
+		}
+	}
+	stopDragging();
 }
 
 watch(
@@ -543,6 +689,13 @@ watch(
 
 onMounted(() => {
 	hintText.value = 'Start by entering an ingredient.';
+});
+
+watchEffect(() => {
+	if (!hoverCard.visible || !hoverCard.nodeId) {
+		return;
+	}
+	updateHoverCardPosition(hoverCard.nodeId);
 });
 
 onBeforeUnmount(() => {
@@ -714,11 +867,51 @@ button:disabled {
 }
 
 .graphPanel {
+	position: relative;
 	background: rgba(255, 255, 255, 0.74);
 	border-radius: 18px;
 	padding: 0.8rem;
 	border: 1px solid rgba(30, 30, 30, 0.12);
 	box-shadow: 0 14px 30px rgba(33, 28, 21, 0.12);
+}
+
+.hoverCard {
+	position: absolute;
+	z-index: 3;
+	width: min(300px, calc(100% - 16px));
+	max-height: 260px;
+	padding: 0.75rem 0.75rem 0.65rem;
+	border-radius: 10px;
+	border: 1px solid rgba(38, 70, 83, 0.22);
+	background: rgba(255, 255, 255, 0.96);
+	box-shadow: 0 12px 26px rgba(22, 22, 22, 0.18);
+	overflow-y: auto;
+	pointer-events: none;
+}
+
+.hoverTitle {
+	margin: 0;
+	font-weight: 700;
+	text-transform: capitalize;
+	color: #1d3557;
+}
+
+.hoverMeta {
+	margin: 0.2rem 0 0.5rem;
+	font-size: 0.86rem;
+	color: #495057;
+}
+
+.hoverCard ul {
+	list-style: disc;
+	margin: 0;
+	padding-left: 1rem;
+	font-size: 0.9rem;
+	color: #212529;
+}
+
+.hoverCard li {
+	margin-bottom: 0.25rem;
 }
 
 .legend {
