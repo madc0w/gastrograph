@@ -393,6 +393,24 @@ type IngredientPathResponse = {
 	paths: IngredientPath[];
 };
 
+type PathSearchStartResponse = {
+	jobId: string;
+	status: 'pending';
+};
+
+type PathSearchStatusResponse =
+	| {
+			status: 'pending';
+	  }
+	| {
+			status: 'done';
+			result: IngredientPathResponse;
+	  }
+	| {
+			status: 'error';
+			error: string;
+	  };
+
 type RenderNode = GraphApiNode & {
 	x: number;
 	y: number;
@@ -465,6 +483,7 @@ const nodeById = computed(() => {
 
 let simulationFrame = 0;
 let hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
+let pathSearchRequestId = 0;
 const dragState = reactive({
 	nodeId: '',
 	isActive: false,
@@ -472,6 +491,12 @@ const dragState = reactive({
 	startX: 0,
 	startY: 0,
 });
+
+function wait(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms);
+	});
+}
 
 const hoverCard = reactive({
 	isVisible: false,
@@ -798,6 +823,8 @@ async function submitIngredient(): Promise<void> {
 }
 
 async function submitPathSearch(): Promise<void> {
+	pathSearchRequestId += 1;
+	const requestId = pathSearchRequestId;
 	const from = pathFromQuery.value.trim();
 	const to = pathToQuery.value.trim();
 
@@ -810,19 +837,64 @@ async function submitPathSearch(): Promise<void> {
 
 	isPathLoading.value = true;
 	pathErrorText.value = '';
-	pathHintText.value = '';
+	pathHintText.value = 'Searching recipe chains...';
 
 	try {
-		const response = await $fetch<IngredientPathResponse>(
-			'/api/ingredient-paths',
+		const startResponse = await $fetch<PathSearchStartResponse>(
+			'/api/ingredient-paths/start',
 			{
-				query: {
+				method: 'POST',
+				body: {
 					from,
 					to,
 					limit: 8,
 				},
 			},
 		);
+
+		const maxPolls = 90;
+		const pollIntervalMs = 350;
+		let response: IngredientPathResponse | null = null;
+
+		for (let poll = 0; poll < maxPolls; poll += 1) {
+			if (requestId !== pathSearchRequestId) {
+				return;
+			}
+
+			const status = await $fetch<PathSearchStatusResponse>(
+				'/api/ingredient-paths/status',
+				{
+					query: {
+						jobId: startResponse.jobId,
+					},
+				},
+			);
+
+			if (status.status === 'done') {
+				response = status.result;
+				break;
+			}
+
+			if (status.status === 'error') {
+				throw createError({
+					statusCode: 500,
+					statusMessage: status.error,
+				});
+			}
+
+			await wait(pollIntervalMs);
+		}
+
+		if (!response) {
+			throw createError({
+				statusCode: 408,
+				statusMessage: 'Path search is taking too long. Try a different pair.',
+			});
+		}
+
+		if (requestId !== pathSearchRequestId) {
+			return;
+		}
 
 		pathFromQuery.value = response.from.name;
 		pathToQuery.value = response.to.name;
@@ -835,6 +907,10 @@ async function submitPathSearch(): Promise<void> {
 				'No connecting chain was found within the search depth.';
 		}
 	} catch (error: unknown) {
+		if (requestId !== pathSearchRequestId) {
+			return;
+		}
+
 		const message =
 			typeof error === 'object' && error && 'statusMessage' in error
 				? String((error as { statusMessage?: string }).statusMessage)
@@ -842,7 +918,9 @@ async function submitPathSearch(): Promise<void> {
 		pathErrorText.value = message;
 		pathResults.value = [];
 	} finally {
-		isPathLoading.value = false;
+		if (requestId === pathSearchRequestId) {
+			isPathLoading.value = false;
+		}
 	}
 }
 
