@@ -10,123 +10,253 @@
 				</p>
 			</header>
 
-			<section class="searchPanel">
-				<form class="searchForm" @submit.prevent="submitIngredient">
-					<label for="ingredient-input">Ingredient</label>
-					<div class="inputRow">
-						<input
-							id="ingredient-input"
-							ref="inputRef"
-							v-model="query"
-							type="text"
-							autocomplete="off"
-							placeholder="Try garlic, butter, tomato..."
-							@focus="onInputFocus"
-							@keydown="onInputKeydown"
-						/>
-						<button type="submit" :disabled="graphLoading">OK</button>
+			<section class="tabs" role="tablist" aria-label="Gastrograph views">
+				<button
+					type="button"
+					class="tabButton"
+					:class="{ active: activeTab === 'search' }"
+					role="tab"
+					:aria-selected="activeTab === 'search'"
+					@click="activeTab = 'search'"
+				>
+					Search
+				</button>
+				<button
+					type="button"
+					class="tabButton"
+					:class="{ active: activeTab === 'path' }"
+					role="tab"
+					:aria-selected="activeTab === 'path'"
+					@click="activeTab = 'path'"
+				>
+					Path
+				</button>
+			</section>
+
+			<template v-if="activeTab === 'search'">
+				<section class="searchPanel">
+					<form class="searchForm" @submit.prevent="submitIngredient">
+						<label for="ingredient-input">Ingredient</label>
+						<div class="inputRow">
+							<input
+								id="ingredient-input"
+								ref="inputRef"
+								v-model="query"
+								type="text"
+								autocomplete="off"
+								placeholder="Try garlic, butter, tomato..."
+								@focus="onInputFocus"
+								@keydown="onInputKeydown"
+							/>
+							<button type="submit" :disabled="isGraphLoading">OK</button>
+						</div>
+
+						<ul v-if="showSuggestions" class="suggestions" role="listbox">
+							<li
+								v-for="(item, index) in suggestions"
+								:key="item.name"
+								class="suggestion"
+								:class="{ active: index === activeSuggestionIndex }"
+								role="option"
+								@click="selectSuggestion(item.name)"
+							>
+								<span>{{ item.name }}</span>
+								<small>{{ item.type }}</small>
+							</li>
+						</ul>
+					</form>
+
+					<p v-if="hintText" class="hint">{{ hintText }}</p>
+					<p v-if="errorText" class="error">{{ errorText }}</p>
+				</section>
+
+				<section class="graphPanel">
+					<div class="legend">
+						<p v-if="centerName">
+							Centered on <strong>{{ centerName }}</strong>
+						</p>
+						<p v-else>Enter an ingredient to build a graph.</p>
 					</div>
 
-					<ul v-if="showSuggestions" class="suggestions" role="listbox">
-						<li
-							v-for="(item, index) in suggestions"
-							:key="item.name"
-							class="suggestion"
-							:class="{ active: index === activeSuggestionIndex }"
-							role="option"
-							@click="selectSuggestion(item.name)"
-						>
-							<span>{{ item.name }}</span>
-							<small>{{ item.type }}</small>
-						</li>
-					</ul>
-				</form>
-
-				<p v-if="hintText" class="hint">{{ hintText }}</p>
-				<p v-if="errorText" class="error">{{ errorText }}</p>
-			</section>
-
-			<section class="graphPanel">
-				<div class="legend">
-					<p v-if="centerName">
-						Centered on <strong>{{ centerName }}</strong>
-					</p>
-					<p v-else>Enter an ingredient to build a graph.</p>
-				</div>
-
-				<div
-					v-if="hoverCard.visible"
-					class="hoverCard"
-					:style="{
-						left: `${hoverCard.left}px`,
-						top: `${hoverCard.top}px`,
-					}"
-				>
-					<p class="hoverTitle">{{ hoverCard.label }}</p>
-					<p v-if="hoverCard.loading" class="hoverMeta">Loading recipes...</p>
-					<p v-else class="hoverMeta">
-						{{ hoverCard.titles.length }} recipes use this ingredient
-					</p>
-					<ul v-if="!hoverCard.loading && hoverCard.titles.length > 0">
-						<li v-for="title in hoverCard.titles" :key="title">{{ title }}</li>
-					</ul>
-					<p
-						v-if="!hoverCard.loading && hoverCard.titles.length === 0"
-						class="hoverMeta"
+					<div
+						v-if="hoverCard.visible"
+						ref="hoverCardRef"
+						class="hoverCard"
+						:style="{
+							left: `${hoverCard.left}px`,
+							top: `${hoverCard.top}px`,
+						}"
+						@pointerenter="onHoverCardPointerEnter"
+						@pointerleave="onHoverCardPointerLeave"
 					>
-						No recipes found.
-					</p>
-				</div>
-
-				<svg
-					ref="svgRef"
-					class="graph"
-					viewBox="0 0 980 640"
-					@pointermove="onPointerMove"
-					@pointerup="stopDragging"
-					@pointerleave="stopDragging"
-				>
-					<g>
-						<line
-							v-for="(link, index) in renderedLinks"
-							:key="`${link.source}-${link.target}-${index}`"
-							:x1="link.x1"
-							:y1="link.y1"
-							:x2="link.x2"
-							:y2="link.y2"
-							:stroke-width="link.stroke"
-						/>
-						<text
-							v-for="(link, index) in renderedLinks"
-							:key="`label-${link.source}-${link.target}-${index}`"
-							class="edgeLabel"
-							:x="(link.x1 + link.x2) / 2"
-							:y="(link.y1 + link.y2) / 2"
+						<p class="hoverTitle">{{ hoverCard.label }}</p>
+						<p v-if="hoverCard.loading" class="hoverMeta">Loading recipes...</p>
+						<p v-else class="hoverMeta">
+							{{ hoverCard.titles.length }} recipes use this ingredient
+						</p>
+						<ul v-if="!hoverCard.loading && hoverCard.titles.length > 0">
+							<li
+								v-for="recipe in hoverCard.titles"
+								:key="recipe.title"
+								:class="{ pairedRecipe: recipe.containsCurrentIngredient }"
+							>
+								<span>{{ recipe.title }}</span>
+								<small v-if="recipe.containsCurrentIngredient">Both</small>
+							</li>
+						</ul>
+						<p
+							v-if="!hoverCard.loading && hoverCard.titles.length === 0"
+							class="hoverMeta"
 						>
-							{{ link.weight }}
-						</text>
-					</g>
+							No recipes found.
+						</p>
+					</div>
 
-					<g>
-						<g
-							v-for="node in renderedNodes"
-							:key="node.id"
-							class="node"
-							:class="{ centerNode: node.isCenter }"
-							:transform="`translate(${node.x}, ${node.y})`"
-							@pointerdown="startDragging($event, node.id)"
-							@pointerup="onNodePointerUp(node.id)"
-							@pointerenter="onNodePointerEnter(node.id)"
-							@pointerleave="onNodePointerLeave"
-						>
-							<circle :r="node.isCenter ? 28 : 20" :fill="node.color" />
-							<text class="nodeLabel" :y="node.isCenter ? 44 : 36">
-								{{ node.label }}
+					<svg
+						ref="svgRef"
+						class="graph"
+						viewBox="0 0 980 640"
+						@pointermove="onPointerMove"
+						@pointerup="stopDragging"
+						@pointerleave="stopDragging"
+					>
+						<g>
+							<line
+								v-for="(link, index) in renderedLinks"
+								:key="`${link.source}-${link.target}-${index}`"
+								:x1="link.x1"
+								:y1="link.y1"
+								:x2="link.x2"
+								:y2="link.y2"
+								:stroke-width="link.stroke"
+							/>
+							<text
+								v-for="(link, index) in renderedLinks"
+								:key="`label-${link.source}-${link.target}-${index}`"
+								class="edgeLabel"
+								:x="(link.x1 + link.x2) / 2"
+								:y="(link.y1 + link.y2) / 2"
+							>
+								{{ link.weight }}
 							</text>
 						</g>
-					</g>
-				</svg>
-			</section>
+
+						<g>
+							<g
+								v-for="node in renderedNodes"
+								:key="node.id"
+								class="node"
+								:class="{
+									centerNode: node.isCenter,
+									hoveredNode:
+										hoverCard.visible && hoverCard.nodeId === node.id,
+								}"
+								:transform="`translate(${node.x}, ${node.y})`"
+								@pointerdown="startDragging($event, node.id)"
+								@pointerup="onNodePointerUp(node.id)"
+								@pointerenter="onNodePointerEnter(node.id)"
+								@pointerleave="onNodePointerLeave"
+							>
+								<circle :r="node.isCenter ? 28 : 20" :fill="node.color" />
+								<text class="nodeLabel" :y="node.isCenter ? 44 : 36">
+									{{ node.label }}
+								</text>
+							</g>
+						</g>
+					</svg>
+				</section>
+			</template>
+
+			<template v-else>
+				<section class="searchPanel">
+					<form class="searchForm" @submit.prevent="submitPathSearch">
+						<div class="pathGrid">
+							<div>
+								<label for="path-from-input">From ingredient</label>
+								<input
+									id="path-from-input"
+									v-model="pathFromQuery"
+									type="text"
+									autocomplete="off"
+									list="path-from-options"
+									placeholder="Try butter"
+									@focus="void fetchPathSuggestions('from', pathFromQuery)"
+									@input="void fetchPathSuggestions('from', pathFromQuery)"
+								/>
+								<datalist id="path-from-options">
+									<option
+										v-for="item in pathFromSuggestions"
+										:key="`from-${item.name}`"
+										:value="item.name"
+									/>
+								</datalist>
+							</div>
+
+							<div>
+								<label for="path-to-input">To ingredient</label>
+								<input
+									id="path-to-input"
+									v-model="pathToQuery"
+									type="text"
+									autocomplete="off"
+									list="path-to-options"
+									placeholder="Try parsley"
+									@focus="void fetchPathSuggestions('to', pathToQuery)"
+									@input="void fetchPathSuggestions('to', pathToQuery)"
+								/>
+								<datalist id="path-to-options">
+									<option
+										v-for="item in pathToSuggestions"
+										:key="`to-${item.name}`"
+										:value="item.name"
+									/>
+								</datalist>
+							</div>
+						</div>
+
+						<div class="pathActions">
+							<button type="submit" :disabled="isPathLoading">OK</button>
+						</div>
+					</form>
+
+					<p v-if="pathHintText" class="hint">{{ pathHintText }}</p>
+					<p v-if="pathErrorText" class="error">{{ pathErrorText }}</p>
+				</section>
+
+				<section class="graphPanel pathPanel">
+					<div class="legend">
+						<p>
+							Showing recipe chains from
+							<strong>{{ pathFromQuery || '...' }}</strong>
+							to
+							<strong>{{ pathToQuery || '...' }}</strong>
+						</p>
+					</div>
+
+					<ol v-if="pathResults.length > 0" class="pathResults">
+						<li
+							v-for="(path, index) in pathResults"
+							:key="`${path.recipeChain.join('-')}-${index}`"
+						>
+							<p class="pathHeading">Path {{ index + 1 }}</p>
+							<p class="pathIngredients">
+								{{ path.ingredientChain.join(' -> ') }}
+							</p>
+							<ul>
+								<li
+									v-for="(recipe, recipeIndex) in path.recipeChain"
+									:key="`${recipe}-${recipeIndex}`"
+								>
+									{{ recipe }}
+								</li>
+							</ul>
+						</li>
+					</ol>
+					<p v-else class="pathEmpty">
+						Choose two ingredients, then click OK to find recipe-name chains.
+					</p>
+				</section>
+			</template>
 		</section>
 	</main>
 </template>
@@ -153,7 +283,30 @@ type GraphApiLink = {
 
 type IngredientRecipesResponse = {
 	ingredientId: string;
-	titles: string[];
+	titles: RecipeListItem[];
+};
+
+type RecipeListItem = {
+	title: string;
+	containsCurrentIngredient: boolean;
+};
+
+type IngredientPath = {
+	ingredientChain: string[];
+	recipeChain: string[];
+	hops: number;
+};
+
+type IngredientPathResponse = {
+	from: {
+		id: string;
+		name: string;
+	};
+	to: {
+		id: string;
+		name: string;
+	};
+	paths: IngredientPath[];
 };
 
 type RenderNode = GraphApiNode & {
@@ -169,18 +322,31 @@ type RenderNode = GraphApiNode & {
 const WIDTH = 980;
 const HEIGHT = 640;
 
+const activeTab = ref<'search' | 'path'>('search');
+
 const query = ref('');
 const inputRef = ref<HTMLInputElement | null>(null);
 const svgRef = ref<SVGSVGElement | null>(null);
+const hoverCardRef = ref<HTMLDivElement | null>(null);
 
 const suggestions = ref<IngredientSuggestion[]>([]);
 const activeSuggestionIndex = ref(0);
-const suggestionLoading = ref(false);
-const graphLoading = ref(false);
+const isSuggestionLoading = ref(false);
+const isGraphLoading = ref(false);
 
 const centerName = ref('');
+const centerId = ref('');
 const hintText = ref('');
 const errorText = ref('');
+
+const pathFromQuery = ref('');
+const pathToQuery = ref('');
+const pathFromSuggestions = ref<IngredientSuggestion[]>([]);
+const pathToSuggestions = ref<IngredientSuggestion[]>([]);
+const pathResults = ref<IngredientPath[]>([]);
+const pathHintText = ref('');
+const pathErrorText = ref('');
+const isPathLoading = ref(false);
 
 const renderedNodes = ref<RenderNode[]>([]);
 const renderedLinks = ref<
@@ -212,6 +378,7 @@ const showSuggestions = computed(
 
 let simulationFrame = 0;
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
 const dragState = reactive({
 	nodeId: '',
 	active: false,
@@ -224,13 +391,22 @@ const hoverCard = reactive({
 	visible: false,
 	nodeId: '',
 	label: '',
-	titles: [] as string[],
+	titles: [] as RecipeListItem[],
 	loading: false,
 	left: 0,
 	top: 0,
 });
 
-const recipeTitlesByNodeId = reactive<Record<string, string[]>>({});
+const hoverState = reactive({
+	overNode: false,
+	overCard: false,
+});
+
+const recipeTitlesByNodeId = reactive<Record<string, RecipeListItem[]>>({});
+
+function getRecipeCacheKey(nodeId: string): string {
+	return `${centerId.value}:${nodeId}`;
+}
 
 const typeColorMap: Record<string, string> = {
 	beef: '#8c2f39',
@@ -411,7 +587,7 @@ async function fetchSuggestions(input: string): Promise<void> {
 		return;
 	}
 
-	suggestionLoading.value = true;
+	isSuggestionLoading.value = true;
 	try {
 		const response = await $fetch<{ items: IngredientSuggestion[] }>(
 			'/api/ingredients',
@@ -424,7 +600,42 @@ async function fetchSuggestions(input: string): Promise<void> {
 	} catch {
 		suggestions.value = [];
 	} finally {
-		suggestionLoading.value = false;
+		isSuggestionLoading.value = false;
+	}
+}
+
+async function fetchPathSuggestions(
+	field: 'from' | 'to',
+	input: string,
+): Promise<void> {
+	if (!input.trim()) {
+		if (field === 'from') {
+			pathFromSuggestions.value = [];
+		} else {
+			pathToSuggestions.value = [];
+		}
+		return;
+	}
+
+	try {
+		const response = await $fetch<{ items: IngredientSuggestion[] }>(
+			'/api/ingredients',
+			{
+				query: { q: input.trim() },
+			},
+		);
+
+		if (field === 'from') {
+			pathFromSuggestions.value = response.items;
+		} else {
+			pathToSuggestions.value = response.items;
+		}
+	} catch {
+		if (field === 'from') {
+			pathFromSuggestions.value = [];
+		} else {
+			pathToSuggestions.value = [];
+		}
 	}
 }
 
@@ -433,6 +644,7 @@ function selectSuggestion(name: string): void {
 	suggestions.value = [];
 	errorText.value = '';
 	hintText.value = `Selected ${name}`;
+	inputRef.value?.blur();
 }
 
 function onInputFocus(): void {
@@ -477,25 +689,26 @@ async function submitIngredient(): Promise<void> {
 		return;
 	}
 
-	graphLoading.value = true;
+	isGraphLoading.value = true;
 	errorText.value = '';
 	hintText.value = '';
 
 	try {
 		const response = await $fetch<{
-			center: { name: string; recipeCount: number };
+			center: { id: string; name: string; recipeCount: number };
 			nodes: GraphApiNode[];
 			links: GraphApiLink[];
 		}>('/api/graph', {
 			query: { ingredient },
 		});
 
+		centerId.value = response.center.id;
 		centerName.value = response.center.name;
 		query.value = response.center.name;
 		renderedNodes.value = createNodeLayout(response.nodes);
 		rebuildRenderedLinks(response.links);
 		runSimulation(response.links);
-		hoverCard.visible = false;
+		hideHoverCard();
 
 		hintText.value =
 			response.links.length > 0
@@ -509,7 +722,56 @@ async function submitIngredient(): Promise<void> {
 				: 'Could not build graph for that ingredient.';
 		errorText.value = message;
 	} finally {
-		graphLoading.value = false;
+		isGraphLoading.value = false;
+	}
+}
+
+async function submitPathSearch(): Promise<void> {
+	const from = pathFromQuery.value.trim();
+	const to = pathToQuery.value.trim();
+
+	if (!from || !to) {
+		pathErrorText.value = 'Select both ingredients first.';
+		pathHintText.value = '';
+		pathResults.value = [];
+		return;
+	}
+
+	isPathLoading.value = true;
+	pathErrorText.value = '';
+	pathHintText.value = '';
+
+	try {
+		const response = await $fetch<IngredientPathResponse>(
+			'/api/ingredient-paths',
+			{
+				query: {
+					from,
+					to,
+					limit: 8,
+				},
+			},
+		);
+
+		pathFromQuery.value = response.from.name;
+		pathToQuery.value = response.to.name;
+		pathResults.value = response.paths.slice(0, 8);
+
+		if (response.paths.length > 0) {
+			pathHintText.value = `Found ${response.paths.length} shortest recipe chains.`;
+		} else {
+			pathHintText.value =
+				'No connecting chain was found within the search depth.';
+		}
+	} catch (error: unknown) {
+		const message =
+			typeof error === 'object' && error && 'statusMessage' in error
+				? String((error as { statusMessage?: string }).statusMessage)
+				: 'Could not find paths for those ingredients.';
+		pathErrorText.value = message;
+		pathResults.value = [];
+	} finally {
+		isPathLoading.value = false;
 	}
 }
 
@@ -583,6 +845,36 @@ function stopDragging(): void {
 	dragState.nodeId = '';
 }
 
+function cancelHoverClose(): void {
+	if (hoverCloseTimer) {
+		clearTimeout(hoverCloseTimer);
+		hoverCloseTimer = null;
+	}
+}
+
+function hideHoverCard(): void {
+	hoverCard.visible = false;
+	hoverCard.nodeId = '';
+	hoverState.overNode = false;
+	hoverState.overCard = false;
+}
+
+function scheduleHoverClose(): void {
+	cancelHoverClose();
+	hoverCloseTimer = setTimeout(() => {
+		if (!hoverState.overNode && !hoverState.overCard) {
+			hideHoverCard();
+		}
+	}, 90);
+}
+
+function eventTargetInsideHoverCard(target: EventTarget | null): boolean {
+	if (!(target instanceof Node)) {
+		return false;
+	}
+	return hoverCardRef.value?.contains(target) ?? false;
+}
+
 function updateHoverCardPosition(nodeId: string): void {
 	const node = renderedNodes.value.find((item) => item.id === nodeId);
 	const svg = svgRef.value;
@@ -592,31 +884,50 @@ function updateHoverCardPosition(nodeId: string): void {
 
 	const panelWidth = svg.clientWidth;
 	const panelHeight = svg.clientHeight;
+	const cardWidth = hoverCardRef.value?.offsetWidth ?? 300;
+	const cardHeight = hoverCardRef.value?.offsetHeight ?? 260;
+	const panel = svg.parentElement;
+	if (!panel) {
+		return;
+	}
+	const svgRect = svg.getBoundingClientRect();
+	const panelRect = panel.getBoundingClientRect();
+	const svgOffsetLeft = svgRect.left - panelRect.left;
+	const svgOffsetTop = svgRect.top - panelRect.top;
 	const nodeX = (node.x / WIDTH) * panelWidth;
 	const nodeY = (node.y / HEIGHT) * panelHeight;
 
-	const estimatedWidth = 300;
-	const estimatedHeight = 260;
-	const gap = 12;
+	const gap = 14;
+	const nodeRadius = node.isCenter ? 28 : 20;
+	const spaceLeft = nodeX;
+	const spaceRight = panelWidth - nodeX;
+	const spaceAbove = nodeY;
+	const spaceBelow = panelHeight - nodeY;
+	const fitsRight = spaceRight >= cardWidth + gap + nodeRadius;
+	const fitsLeft = spaceLeft >= cardWidth + gap + nodeRadius;
+	const placeRight = fitsRight || (!fitsLeft && spaceRight >= spaceLeft);
+	const fitsBelow = spaceBelow >= cardHeight + gap + nodeRadius;
+	const fitsAbove = spaceAbove >= cardHeight + gap + nodeRadius;
+	const placeBelow = fitsBelow || (!fitsAbove && spaceBelow >= spaceAbove);
 
-	const left = clamp(
-		nodeX + gap,
-		8,
-		Math.max(8, panelWidth - estimatedWidth - 8),
-	);
-	const top = clamp(
-		nodeY - 40,
-		8,
-		Math.max(8, panelHeight - estimatedHeight - 8),
-	);
+	const anchoredLeft = placeRight
+		? nodeX + nodeRadius + gap
+		: nodeX - cardWidth - nodeRadius - gap;
+	const anchoredTop = placeBelow
+		? nodeY + nodeRadius + gap
+		: nodeY - cardHeight - nodeRadius - gap;
+
+	const left = svgOffsetLeft + anchoredLeft;
+	const top = svgOffsetTop + anchoredTop;
 
 	hoverCard.left = left;
 	hoverCard.top = top;
 }
 
 async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
-	if (recipeTitlesByNodeId[nodeId]) {
-		hoverCard.titles = recipeTitlesByNodeId[nodeId];
+	const cacheKey = getRecipeCacheKey(nodeId);
+	if (recipeTitlesByNodeId[cacheKey]) {
+		hoverCard.titles = recipeTitlesByNodeId[cacheKey];
 		hoverCard.loading = false;
 		return;
 	}
@@ -626,13 +937,13 @@ async function fetchRecipeTitlesForNode(nodeId: string): Promise<void> {
 		const response = await $fetch<IngredientRecipesResponse>(
 			'/api/ingredient-recipes',
 			{
-				query: { ingredientId: nodeId },
+				query: { ingredientId: nodeId, currentIngredientId: centerId.value },
 			},
 		);
-		recipeTitlesByNodeId[nodeId] = response.titles;
+		recipeTitlesByNodeId[cacheKey] = response.titles;
 		hoverCard.titles = response.titles;
 	} catch {
-		recipeTitlesByNodeId[nodeId] = [];
+		recipeTitlesByNodeId[cacheKey] = [];
 		hoverCard.titles = [];
 	} finally {
 		hoverCard.loading = false;
@@ -645,18 +956,41 @@ async function onNodePointerEnter(nodeId: string): Promise<void> {
 		return;
 	}
 
+	cancelHoverClose();
+	hoverState.overNode = true;
 	hoverCard.nodeId = nodeId;
 	hoverCard.label = node.label;
 	hoverCard.visible = true;
-	hoverCard.titles = recipeTitlesByNodeId[nodeId] ?? [];
-	hoverCard.loading = !recipeTitlesByNodeId[nodeId];
+	const cacheKey = getRecipeCacheKey(nodeId);
+	hoverCard.titles = recipeTitlesByNodeId[cacheKey] ?? [];
+	hoverCard.loading = !recipeTitlesByNodeId[cacheKey];
+	updateHoverCardPosition(nodeId);
+	await nextTick();
 	updateHoverCardPosition(nodeId);
 	await fetchRecipeTitlesForNode(nodeId);
 }
 
-function onNodePointerLeave(): void {
-	hoverCard.visible = false;
-	hoverCard.nodeId = '';
+function onNodePointerLeave(event: PointerEvent): void {
+	hoverState.overNode = false;
+	if (eventTargetInsideHoverCard(event.relatedTarget)) {
+		hoverState.overCard = true;
+		cancelHoverClose();
+		return;
+	}
+	scheduleHoverClose();
+}
+
+function onHoverCardPointerEnter(): void {
+	hoverState.overCard = true;
+	cancelHoverClose();
+}
+
+function onHoverCardPointerLeave(event: PointerEvent): void {
+	hoverState.overCard = false;
+	if (eventTargetInsideHoverCard(event.relatedTarget)) {
+		return;
+	}
+	scheduleHoverClose();
 }
 
 function onNodePointerUp(nodeId: string): void {
@@ -681,6 +1015,10 @@ watch(
 		}
 
 		searchDebounceTimer = setTimeout(() => {
+			if (document.activeElement !== inputRef.value) {
+				suggestions.value = [];
+				return;
+			}
 			void fetchSuggestions(value);
 		}, 140);
 	},
@@ -689,6 +1027,7 @@ watch(
 
 onMounted(() => {
 	hintText.value = 'Start by entering an ingredient.';
+	pathHintText.value = 'Select two ingredients and click OK.';
 });
 
 watchEffect(() => {
@@ -701,6 +1040,9 @@ watchEffect(() => {
 onBeforeUnmount(() => {
 	if (searchDebounceTimer) {
 		clearTimeout(searchDebounceTimer);
+	}
+	if (hoverCloseTimer) {
+		clearTimeout(hoverCloseTimer);
 	}
 	if (simulationFrame) {
 		cancelAnimationFrame(simulationFrame);
@@ -725,6 +1067,36 @@ onBeforeUnmount(() => {
 	margin: 0 auto;
 	display: grid;
 	gap: 1.1rem;
+}
+
+.tabs {
+	display: flex;
+	gap: 0.55rem;
+}
+
+.tabButton {
+	padding: 0.55rem 0.95rem;
+	border-radius: 999px;
+	border: 1px solid rgba(40, 54, 24, 0.26);
+	background: rgba(255, 255, 255, 0.75);
+	color: #283618;
+	font-size: 0.9rem;
+	font-weight: 700;
+	cursor: pointer;
+	transition:
+		background 0.16s ease,
+		transform 0.14s ease,
+		box-shadow 0.16s ease;
+}
+
+.tabButton.active {
+	background: linear-gradient(140deg, #606c38 0%, #283618 100%);
+	color: #f8fafc;
+	box-shadow: 0 8px 18px rgba(40, 54, 24, 0.24);
+}
+
+.tabButton:hover {
+	transform: translateY(-1px);
 }
 
 .hero {
@@ -774,6 +1146,18 @@ h1 {
 	font-weight: 700;
 	margin-bottom: 0.4rem;
 	color: #344e41;
+}
+
+.pathGrid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 0.7rem;
+}
+
+.pathActions {
+	margin-top: 0.7rem;
+	display: flex;
+	justify-content: flex-end;
 }
 
 .inputRow {
@@ -875,6 +1259,50 @@ button:disabled {
 	box-shadow: 0 14px 30px rgba(33, 28, 21, 0.12);
 }
 
+.pathPanel {
+	padding: 1rem;
+}
+
+.pathResults {
+	margin: 0;
+	padding: 0 0 0 1.1rem;
+	display: grid;
+	gap: 0.75rem;
+}
+
+.pathResults > li {
+	background: rgba(255, 255, 255, 0.82);
+	border: 1px solid rgba(40, 54, 24, 0.15);
+	border-radius: 12px;
+	padding: 0.65rem 0.75rem;
+}
+
+.pathHeading {
+	margin: 0 0 0.2rem;
+	font-weight: 700;
+	color: #344e41;
+}
+
+.pathIngredients {
+	margin: 0 0 0.45rem;
+	font-size: 0.88rem;
+	color: #495057;
+}
+
+.pathResults ul {
+	margin: 0;
+	padding-left: 1rem;
+	display: grid;
+	gap: 0.2rem;
+}
+
+.pathEmpty {
+	margin: 0;
+	padding: 0.4rem 0.6rem;
+	font-size: 0.92rem;
+	color: #495057;
+}
+
 .hoverCard {
 	position: absolute;
 	z-index: 3;
@@ -886,7 +1314,7 @@ button:disabled {
 	background: rgba(255, 255, 255, 0.96);
 	box-shadow: 0 12px 26px rgba(22, 22, 22, 0.18);
 	overflow-y: auto;
-	pointer-events: none;
+	pointer-events: auto;
 }
 
 .hoverTitle {
@@ -911,7 +1339,31 @@ button:disabled {
 }
 
 .hoverCard li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
 	margin-bottom: 0.25rem;
+	gap: 0.75rem;
+	padding: 0.22rem 0.42rem;
+	border-radius: 8px;
+}
+
+.hoverCard li small {
+	flex-shrink: 0;
+	font-size: 0.7rem;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #6b705c;
+}
+
+.hoverCard li.pairedRecipe {
+	background: linear-gradient(
+		135deg,
+		rgba(233, 237, 201, 0.95),
+		rgba(255, 244, 199, 0.95)
+	);
+	box-shadow: inset 0 0 0 1px rgba(96, 108, 56, 0.2);
 }
 
 .legend {
@@ -943,6 +1395,27 @@ line {
 	cursor: grab;
 	transition: opacity 0.16s ease;
 	user-select: none;
+}
+
+.node circle {
+	stroke: rgba(255, 255, 255, 0.18);
+	stroke-width: 1.5;
+	transition:
+		stroke-width 0.16s ease,
+		stroke 0.16s ease,
+		filter 0.16s ease;
+}
+
+.node.hoveredNode circle,
+.node:hover circle {
+	stroke: #fff4c7;
+	stroke-width: 4;
+	filter: drop-shadow(0 0 10px rgba(255, 244, 199, 0.8));
+}
+
+.node.hoveredNode .nodeLabel,
+.node:hover .nodeLabel {
+	fill: #0f172a;
 }
 
 .node:active {
@@ -989,6 +1462,10 @@ line {
 
 	.searchPanel {
 		padding: 0.8rem;
+	}
+
+	.pathGrid {
+		grid-template-columns: 1fr;
 	}
 
 	.inputRow {
