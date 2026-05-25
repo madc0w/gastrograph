@@ -93,7 +93,11 @@
 							<li
 								v-for="recipe in hoverCard.titles"
 								:key="recipe.title"
-								:class="{ pairedRecipe: recipe.containsCurrentIngredient }"
+								:class="{
+									pairedRecipe:
+										recipe.containsCurrentIngredient &&
+										hoverCard.nodeId !== centerId,
+								}"
 							>
 								<button
 									type="button"
@@ -102,7 +106,14 @@
 								>
 									{{ recipe.title }}
 								</button>
-								<small v-if="recipe.containsCurrentIngredient">Both</small>
+								<small
+									v-if="
+										recipe.containsCurrentIngredient &&
+										hoverCard.nodeId !== centerId
+									"
+								>
+									Both
+								</small>
 							</li>
 						</ul>
 						<p
@@ -125,6 +136,16 @@
 							<line
 								v-for="(link, index) in renderedLinks"
 								:key="`${link.source}-${link.target}-${index}`"
+								:class="{
+									hoveredEdge:
+										hoverCard.isVisible &&
+										(hoverCard.nodeId === link.source ||
+											hoverCard.nodeId === link.target),
+									dimmedEdge:
+										hoverCard.isVisible &&
+										hoverCard.nodeId !== link.source &&
+										hoverCard.nodeId !== link.target,
+								}"
 								:x1="link.x1"
 								:y1="link.y1"
 								:x2="link.x2"
@@ -135,6 +156,16 @@
 								v-for="(link, index) in renderedLinks"
 								:key="`label-${link.source}-${link.target}-${index}`"
 								class="edgeLabel"
+								:class="{
+									hoveredEdgeLabel:
+										hoverCard.isVisible &&
+										(hoverCard.nodeId === link.source ||
+											hoverCard.nodeId === link.target),
+									dimmedEdgeLabel:
+										hoverCard.isVisible &&
+										hoverCard.nodeId !== link.source &&
+										hoverCard.nodeId !== link.target,
+								}"
 								:x="(link.x1 + link.x2) / 2"
 								:y="(link.y1 + link.y2) / 2"
 							>
@@ -149,6 +180,8 @@
 								class="node"
 								:class="{
 									centerNode: node.isCenter,
+									dimmedNode:
+										hoverCard.isVisible && hoverCard.nodeId !== node.id,
 									hoveredNode:
 										hoverCard.isVisible && hoverCard.nodeId === node.id,
 								}"
@@ -317,7 +350,15 @@
 								</li>
 							</ul>
 
-							<ol class="recipeDirections">
+							<hr class="recipeDivider" />
+
+							<p
+								v-if="recipeModal.recipe.directions.length === 1"
+								class="recipeDirectionSingle"
+							>
+								{{ recipeModal.recipe.directions[0] }}
+							</p>
+							<ol v-else class="recipeDirections">
 								<li
 									v-for="(direction, index) in recipeModal.recipe.directions"
 									:key="`${index}-${direction}`"
@@ -1504,9 +1545,11 @@ h1 {
 	max-height: 260px;
 	padding: 0.75rem 0.75rem 0.65rem;
 	border-radius: 10px;
-	border: 1px solid rgba(38, 70, 83, 0.22);
-	background: rgba(255, 255, 255, 0.96);
-	box-shadow: 0 12px 26px rgba(22, 22, 22, 0.18);
+	border: 1px solid rgba(29, 53, 87, 0.45);
+	background: rgba(255, 255, 255, 0.985);
+	box-shadow:
+		0 18px 34px rgba(22, 22, 22, 0.22),
+		0 0 0 2px rgba(255, 244, 199, 0.8);
 	overflow-y: auto;
 	pointer-events: auto;
 }
@@ -1594,12 +1637,28 @@ h1 {
 
 line {
 	stroke: rgba(73, 80, 87, 0.65);
+	transition:
+		opacity 0.16s ease,
+		stroke 0.16s ease,
+		stroke-width 0.16s ease;
+}
+
+line.hoveredEdge {
+	stroke: rgba(29, 53, 87, 0.95);
+}
+
+line.dimmedEdge {
+	opacity: 0.16;
 }
 
 .node {
 	cursor: grab;
 	transition: opacity 0.16s ease;
 	user-select: none;
+}
+
+.node.dimmedNode {
+	opacity: 0.38;
 }
 
 .node circle {
@@ -1654,6 +1713,17 @@ line {
 	stroke-linecap: butt;
 	stroke-linejoin: miter;
 	pointer-events: none;
+	transition:
+		opacity 0.16s ease,
+		fill 0.16s ease;
+}
+
+.edgeLabel.hoveredEdgeLabel {
+	fill: #1d3557;
+}
+
+.edgeLabel.dimmedEdgeLabel {
+	opacity: 0.2;
 }
 
 .recipeModalOverlay {
@@ -1738,9 +1808,22 @@ line {
 	list-style: disc;
 }
 
+.recipeDivider {
+	border: 0;
+	height: 1px;
+	margin: 0.9rem 0 0;
+	background: rgba(40, 54, 24, 0.3);
+}
+
 .recipeDirections {
 	list-style: decimal;
 	gap: 0.5rem;
+}
+
+.recipeDirectionSingle {
+	margin: 0.85rem 0 0;
+	line-height: 1.45;
+	color: #263238;
 }
 
 .recipeIngredients li,
