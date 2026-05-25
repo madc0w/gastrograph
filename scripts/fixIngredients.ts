@@ -4,6 +4,7 @@ type IngredientDoc = {
 	_id?: ObjectId;
 	name: string;
 	type: string;
+	creationDate?: Date;
 };
 
 type IngredientRef = {
@@ -15,6 +16,7 @@ type IngredientRef = {
 type RecipeDoc = {
 	title: string;
 	ingredients: IngredientRef[];
+	creationDate?: Date;
 };
 
 type ContainsReplaceRule = {
@@ -525,7 +527,11 @@ async function getOrCreateIngredient(
 	const insert = await ingredientsCollection.insertOne({
 		name: canonical,
 		type: 'other',
+		creationDate: new Date(),
 	});
+	console.log(
+		`Created Ingredient: ${canonical} (other) [${insert.insertedId.toHexString()}]`,
+	);
 	stats.replacementIngredientsCreated += 1;
 	return insert.insertedId;
 }

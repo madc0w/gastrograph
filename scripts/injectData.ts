@@ -8,6 +8,7 @@ type IngredientDoc = {
 	_id?: ObjectId;
 	name: string;
 	type: string;
+	creationDate: Date;
 };
 
 type RecipeIngredient = {
@@ -21,6 +22,7 @@ type RecipeDoc = {
 	ingredients: RecipeIngredient[];
 	directions: string[];
 	ner: string;
+	creationDate: Date;
 };
 
 type ParsedRow = {
@@ -218,6 +220,30 @@ const ALLOWED_INGREDIENT_CATEGORIES = new Set([
 	'nut',
 	'other',
 ]);
+
+let hasTransientStatusLine = false;
+
+function writeTransientStatusLine(message: string): void {
+	process.stdout.write(`\r${message}`);
+	hasTransientStatusLine = true;
+}
+
+function flushTransientStatusLine(): void {
+	if (hasTransientStatusLine) {
+		process.stdout.write('\n');
+		hasTransientStatusLine = false;
+	}
+}
+
+function logLine(message: string): void {
+	flushTransientStatusLine();
+	console.log(message);
+}
+
+function errorLine(message: string): void {
+	flushTransientStatusLine();
+	console.error(message);
+}
 
 function formatDuration(totalSeconds: number): string {
 	if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
@@ -830,8 +856,12 @@ async function upsertIngredient(
 				const insert = await ingredientsCollection.insertOne({
 					name: normalized.name,
 					type,
+					creationDate: new Date(),
 				} as IngredientDoc);
 				ingredientId = insert.insertedId;
+				logLine(
+					`Created Ingredient: ${normalized.name} (${type}) [${insert.insertedId.toHexString()}]`,
+				);
 			}
 		}
 
@@ -968,8 +998,8 @@ async function importCsvData(): Promise<void> {
 					}
 					const heartbeatNow = Date.now();
 					if (heartbeatNow - lastRowHeartbeatAt >= 5_000) {
-						process.stdout.write(
-							`\rWorking row ${processed}/${totalRows} | ingredient ${ingredientIndex + 1}/${parsed.ingredients.length}`,
+						writeTransientStatusLine(
+							`Working row ${processed}/${totalRows} | ingredient ${ingredientIndex + 1}/${parsed.ingredients.length}`,
 						);
 						lastRowHeartbeatAt = heartbeatNow;
 					}
@@ -994,15 +1024,19 @@ async function importCsvData(): Promise<void> {
 					ingredients: ingredientRefs,
 					directions: parsed.directions,
 					ner: parsed.nerIngredients.join(', '),
+					creationDate: new Date(),
 				};
 
-				await recipesCollection.insertOne(recipeDoc);
+				const recipeInsert = await recipesCollection.insertOne(recipeDoc);
+				logLine(
+					`Created Recipe: ${recipeTitle} [${recipeInsert.insertedId.toHexString()}]`,
+				);
 
 				inserted += 1;
 			} catch (error) {
 				failed += 1;
 				const message = error instanceof Error ? error.message : String(error);
-				console.error(`Failed on data row ${processed}: ${message}`);
+				errorLine(`Failed on data row ${processed}: ${message}`);
 			}
 
 			const percent = Math.floor((processed / totalRows) * 100);
@@ -1027,13 +1061,13 @@ async function importCsvData(): Promise<void> {
 						? remainingRows / rowsPerSecond
 						: Number.POSITIVE_INFINITY;
 
-				process.stdout.write(
-					`\rProgress: ${percent}% (${processed}/${totalRows}) | ${rowsPerSecond.toFixed(1)} rows/s | ETA ${formatDuration(etaSeconds)}`,
+				writeTransientStatusLine(
+					`Progress: ${percent}% (${processed}/${totalRows}) | ${rowsPerSecond.toFixed(1)} rows/s | ETA ${formatDuration(etaSeconds)}`,
 				);
 			}
 		}
 
-		process.stdout.write('\n');
+		flushTransientStatusLine();
 		console.log('Import complete.');
 		console.log(`Processed: ${processed}`);
 		console.log(`Inserted/Updated recipes: ${inserted}`);
