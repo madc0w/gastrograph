@@ -48,6 +48,10 @@ const __dirname = resolve(__filename, '..');
 const DATASET_PATH = resolve(__dirname, '..', 'dataset', 'full_dataset.csv');
 
 const ingredientTypeCache = new Map<string, string>();
+const normalizedIngredientCache = new Map<
+	string,
+	{ name: string; isFood: boolean }
+>();
 const ALLOWED_INGREDIENT_CATEGORIES = new Set([
 	'beef',
 	'fish',
@@ -55,7 +59,7 @@ const ALLOWED_INGREDIENT_CATEGORIES = new Set([
 	'pork',
 	'vegetable',
 	'fruit',
-	'cheeses',
+	'cheese',
 	'spice',
 	'dairy',
 	'grain',
@@ -117,6 +121,10 @@ function parseCsvLine(line: string): string[] {
 
 	values.push(current);
 	return values;
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function safeJsonStringArray(raw: string): string[] {
@@ -395,6 +403,103 @@ async function classifyIngredientType(name: string): Promise<string> {
 	}
 }
 
+async function normalizeIngredientWithGpt(
+	rawName: string,
+): Promise<{ name: string; isFood: boolean }> {
+	const seed = normalizeIngredientName(rawName);
+	if (!seed) {
+		return { name: '', isFood: false };
+	}
+
+	if (normalizedIngredientCache.has(seed)) {
+		return normalizedIngredientCache.get(seed) as {
+			name: string;
+			isFood: boolean;
+		};
+	}
+
+	const prompt = [
+		'Normalize this candidate into a canonical food ingredient name.',
+		'Requirements:',
+		'- Remove quantity and units.',
+		'- Remove prep instructions/adjectives (for example "banana, mashed" => "banana").',
+		'- Depluralize (for example "bananas" => "banana").',
+		'- Fix obvious spelling mistakes (for example "bakon" => "bacon").',
+		'- Minimize to the fewest words that preserve ingredient identity (for example "beef bouillon concentrate" => "beef bouillon").',
+		'- Reject non-food words or actions (for example "also", "love", "balloons", "bake").',
+		'Respond with strict JSON only, no markdown:',
+		'{"isFood": boolean, "name": string}',
+		'If not a valid food ingredient, return {"isFood": false, "name": ""}.',
+		`Candidate: ${seed}`,
+	].join('\n');
+
+	try {
+		const response = await fetch('https://api.openai.com/v1/responses', {
+			method: 'POST',
+			signal: AbortSignal.timeout(20_000),
+			headers: {
+				Authorization: `Bearer ${openaiApiKey}`,
+				'Content-Type': 'application/json',
+			},
+			body: JSON.stringify({
+				model: openaiModel,
+				input: prompt,
+				max_output_tokens: 80,
+			}),
+		});
+
+		if (!response.ok) {
+			throw new Error(`OpenAI request failed: ${response.status}`);
+		}
+
+		const data = (await response.json()) as {
+			output_text?: string;
+			output?: Array<{ content?: Array<{ text?: string }> }>;
+		};
+
+		let text = (data.output_text || '').trim();
+		if (!text && Array.isArray(data.output)) {
+			text = data.output
+				.flatMap((o) => o.content || [])
+				.map((c) => c.text || '')
+				.join(' ')
+				.trim();
+		}
+
+		if (!text) {
+			const fallback = { name: '', isFood: false };
+			normalizedIngredientCache.set(seed, fallback);
+			return fallback;
+		}
+
+		const jsonMatch = text.match(/\{[\s\S]*\}/);
+		const jsonText = (jsonMatch?.[0] || text).trim();
+		const parsed = JSON.parse(jsonText) as {
+			isFood?: unknown;
+			name?: unknown;
+		};
+
+		const isFood = parsed.isFood === true;
+		const normalized = isFood
+			? normalizeIngredientName(String(parsed.name ?? ''))
+			: '';
+
+		if (!isFood || !normalized) {
+			const rejected = { name: '', isFood: false };
+			normalizedIngredientCache.set(seed, rejected);
+			return rejected;
+		}
+
+		const accepted = { name: normalized, isFood: true };
+		normalizedIngredientCache.set(seed, accepted);
+		return accepted;
+	} catch {
+		const fallback = { name: '', isFood: false };
+		normalizedIngredientCache.set(seed, fallback);
+		return fallback;
+	}
+}
+
 function findValueByHeader(
 	headers: string[],
 	values: string[],
@@ -466,7 +571,7 @@ async function upsertIngredient(
 		return null;
 	}
 
-	const existing = (await ingredientsCollection.findOne({
+	let existing = (await ingredientsCollection.findOne({
 		name: normalizedName,
 	})) as IngredientDoc | null;
 
@@ -475,12 +580,25 @@ async function upsertIngredient(
 	if (existing?._id) {
 		ingredientId = existing._id;
 	} else {
-		const type = await classifyIngredientType(normalizedName);
-		const insert = await ingredientsCollection.insertOne({
-			name: normalizedName,
-			type,
-		} as IngredientDoc);
-		ingredientId = insert.insertedId;
+		const normalized = await normalizeIngredientWithGpt(normalizedName);
+		if (!normalized.isFood || !normalized.name) {
+			return null;
+		}
+
+		existing = (await ingredientsCollection.findOne({
+			name: normalized.name,
+		})) as IngredientDoc | null;
+
+		if (existing?._id) {
+			ingredientId = existing._id;
+		} else {
+			const type = await classifyIngredientType(normalized.name);
+			const insert = await ingredientsCollection.insertOne({
+				name: normalized.name,
+				type,
+			} as IngredientDoc);
+			ingredientId = insert.insertedId;
+		}
 	}
 
 	return {
@@ -490,6 +608,47 @@ async function upsertIngredient(
 	};
 }
 
+async function resolveRecipeTitle(
+	recipesCollection: Collection<RecipeDoc>,
+	baseTitle: string,
+): Promise<string> {
+	const escapedBaseTitle = escapeRegExp(baseTitle);
+	const titleRegex = new RegExp(`^${escapedBaseTitle}(?: v\\d+)?$`);
+	const matches = (await recipesCollection
+		.find(
+			{ title: { $regex: titleRegex } },
+			{ projection: { _id: 0, title: 1 } },
+		)
+		.toArray()) as Array<{ title?: string }>;
+
+	if (matches.length === 0) {
+		return baseTitle;
+	}
+
+	let maxVersion = 1;
+	for (const doc of matches) {
+		const title = (doc.title ?? '').trim();
+		if (title === baseTitle) {
+			maxVersion = Math.max(maxVersion, 1);
+			continue;
+		}
+
+		const versionMatch = title.match(
+			new RegExp(`^${escapedBaseTitle} v(\\d+)$`),
+		);
+		if (!versionMatch) {
+			continue;
+		}
+
+		const version = Number.parseInt(versionMatch[1] ?? '', 10);
+		if (Number.isFinite(version) && version >= 2) {
+			maxVersion = Math.max(maxVersion, version);
+		}
+	}
+
+	return `${baseTitle} v${maxVersion + 1}`;
+}
+
 async function importCsvData(): Promise<void> {
 	const client = new MongoClient(mongodbUri);
 
@@ -497,8 +656,8 @@ async function importCsvData(): Promise<void> {
 
 	try {
 		const db = client.db(mongodbDb);
-		const ingredientsCollection = db.collection<IngredientDoc>('Ingedients');
-		const recipesCollection = db.collection('Recipes');
+		const ingredientsCollection = db.collection<IngredientDoc>('Ingredients');
+		const recipesCollection = db.collection<RecipeDoc>('Recipes');
 
 		await ingredientsCollection.createIndex({ name: 1 }, { unique: true });
 		await recipesCollection.createIndex({ title: 1 }, { unique: true });
@@ -582,18 +741,19 @@ async function importCsvData(): Promise<void> {
 					}
 				}
 
+				const recipeTitle = await resolveRecipeTitle(
+					recipesCollection,
+					parsed.title,
+				);
+
 				const recipeDoc: RecipeDoc = {
-					title: parsed.title,
+					title: recipeTitle,
 					ingredients: ingredientRefs,
 					directions: parsed.directions,
 					ner: parsed.nerIngredients.join(', '),
 				};
 
-				await recipesCollection.updateOne(
-					{ title: recipeDoc.title },
-					{ $set: recipeDoc, $unset: { link: '', source: '' } },
-					{ upsert: true },
-				);
+				await recipesCollection.insertOne(recipeDoc);
 
 				inserted += 1;
 			} catch (error) {

@@ -1,5 +1,6 @@
 import {
 	findIngredientPaths,
+	findIngredientPathsLegacy,
 	parsePathLimit,
 } from '../../utils/ingredient-path-search';
 import {
@@ -12,6 +13,7 @@ type StartPathSearchBody = {
 	from?: string;
 	to?: string;
 	limit?: string | number;
+	mode?: 'fast' | 'legacy';
 };
 
 export default defineEventHandler(async (event) => {
@@ -23,6 +25,7 @@ export default defineEventHandler(async (event) => {
 			? String(body.limit)
 			: undefined;
 	const limit = parsePathLimit(limitRaw);
+	const mode = body?.mode === 'legacy' ? 'legacy' : 'fast';
 
 	if (!fromInput || !toInput) {
 		throw createError({
@@ -36,7 +39,9 @@ export default defineEventHandler(async (event) => {
 	setTimeout(() => {
 		void (async () => {
 			try {
-				const result = await findIngredientPaths({
+				const queryFn =
+					mode === 'legacy' ? findIngredientPathsLegacy : findIngredientPaths;
+				const result = await queryFn({
 					fromInput,
 					toInput,
 					limit,

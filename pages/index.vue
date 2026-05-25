@@ -171,6 +171,17 @@
 			<template v-else>
 				<section class="searchPanel">
 					<form class="searchForm" @submit.prevent="submitPathSearch">
+						<!-- 						
+						<div class="pathModeRow">
+							<label class="pathModeToggle">
+								<input
+									type="checkbox"
+									v-model="pathUseLegacyQuery"
+									:disabled="isPathLoading"
+								/>
+								<span>Use old slow query</span>
+							</label>
+						</div> -->
 						<div class="pathGrid">
 							<IngredientAutocomplete
 								input-id="path-from-input"
@@ -231,7 +242,10 @@
 							v-for="(path, index) in pathResults"
 							:key="`${path.recipeChain.map((recipe) => recipe.title).join('-')}-${index}`"
 						>
-							<ol class="pathSteps">
+							<ol
+								class="pathSteps"
+								:class="{ singleStepPath: path.recipeChain.length === 1 }"
+							>
 								<li
 									v-for="(recipe, recipeIndex) in path.recipeChain"
 									:key="`${recipe.title}-${recipeIndex}`"
@@ -398,6 +412,8 @@ type PathSearchStartResponse = {
 	status: 'pending';
 };
 
+type PathQueryMode = 'fast' | 'legacy';
+
 type PathSearchStatusResponse =
 	| {
 			status: 'pending';
@@ -443,6 +459,7 @@ const pathResults = ref<IngredientPath[]>([]);
 const pathHintText = ref('');
 const pathErrorText = ref('');
 const isPathLoading = ref(false);
+const pathUseLegacyQuery = ref(false);
 
 const recipeModal = reactive<{
 	isVisible: boolean;
@@ -837,7 +854,11 @@ async function submitPathSearch(): Promise<void> {
 
 	isPathLoading.value = true;
 	pathErrorText.value = '';
-	pathHintText.value = 'Searching recipe chains...';
+	const mode: PathQueryMode = pathUseLegacyQuery.value ? 'legacy' : 'fast';
+	pathHintText.value =
+		mode === 'legacy'
+			? 'Searching recipe chains with old slow query...'
+			: 'Searching recipe chains with fast query...';
 
 	try {
 		const startResponse = await $fetch<PathSearchStartResponse>(
@@ -848,12 +869,14 @@ async function submitPathSearch(): Promise<void> {
 					from,
 					to,
 					limit: 8,
+					mode,
 				},
 			},
 		);
 
-		const maxPolls = 90;
-		const pollIntervalMs = 350;
+		const pollIntervalMs = mode === 'legacy' ? 800 : 350;
+		const maxWaitMs = mode === 'legacy' ? 20 * 60 * 1000 : 2 * 60 * 1000;
+		const maxPolls = Math.ceil(maxWaitMs / pollIntervalMs);
 		let response: IngredientPathResponse | null = null;
 
 		for (let poll = 0; poll < maxPolls; poll += 1) {
@@ -888,7 +911,10 @@ async function submitPathSearch(): Promise<void> {
 		if (!response) {
 			throw createError({
 				statusCode: 408,
-				statusMessage: 'Path search is taking too long. Try a different pair.',
+				statusMessage:
+					mode === 'legacy'
+						? 'Old query is still running after a long wait. Try fast query or a different pair.'
+						: 'Path search is taking too long. Try a different pair.',
 			});
 		}
 
@@ -901,7 +927,10 @@ async function submitPathSearch(): Promise<void> {
 		pathResults.value = response.paths.slice(0, 8);
 
 		if (response.paths.length > 0) {
-			pathHintText.value = `Found ${response.paths.length} shortest recipe chains.`;
+			pathHintText.value =
+				mode === 'legacy'
+					? `Found ${response.paths.length} shortest recipe chains (old query).`
+					: `Found ${response.paths.length} shortest recipe chains (fast query).`;
 		} else {
 			pathHintText.value =
 				'No connecting chain was found within the search depth.';
@@ -1295,6 +1324,27 @@ h1 {
 	box-shadow: 0 12px 28px rgba(41, 35, 26, 0.09);
 }
 
+.pathModeRow {
+	margin-bottom: 0.55rem;
+	display: flex;
+	justify-content: flex-start;
+}
+
+.pathModeToggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-size: 0.9rem;
+	font-weight: 600;
+	color: #283618;
+	user-select: none;
+}
+
+.pathModeToggle input {
+	margin: 0;
+	accent-color: #283618;
+}
+
 .pathGrid {
 	display: grid;
 	grid-template-columns: repeat(2, minmax(120px, max-content)) auto;
@@ -1428,6 +1478,11 @@ h1 {
 	padding-left: 1rem;
 	display: grid;
 	gap: 0.2rem;
+}
+
+.pathSteps.singleStepPath {
+	padding-left: 0;
+	list-style: none;
 }
 
 .pathSteps > li {

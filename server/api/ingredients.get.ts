@@ -9,7 +9,7 @@ function escapeRegExp(value: string): string {
 
 export default defineEventHandler(async (event) => {
 	const db = await getMongoDb();
-	const ingredients = db.collection('Ingedients');
+	const ingredients = db.collection('Ingredients');
 
 	const qRaw = getQuery(event).q;
 	const q = typeof qRaw === 'string' ? qRaw.trim().toLowerCase() : '';

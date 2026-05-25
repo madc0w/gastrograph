@@ -35,7 +35,7 @@ function normalizeIngredientName(value: string): string {
 
 export default defineEventHandler(async (event) => {
 	const db = await getMongoDb();
-	const ingredients = db.collection<IngredientDoc>('Ingedients');
+	const ingredients = db.collection<IngredientDoc>('Ingredients');
 	const recipes = db.collection('Recipes');
 
 	const ingredientRaw = getQuery(event).ingredient;

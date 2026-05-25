@@ -12,7 +12,7 @@ type PathSearchJob = {
 	error?: string;
 };
 
-const JOB_TTL_MS = 10 * 60 * 1000;
+const JOB_TTL_MS = 60 * 60 * 1000;
 const JOB_LIMIT = 500;
 const jobs = new Map<string, PathSearchJob>();
 
