@@ -1,5 +1,5 @@
 import { createReadStream } from 'fs';
-import { Collection, MongoClient, ObjectId } from 'mongodb';
+import { Collection, MongoClient, MongoServerError, ObjectId } from 'mongodb';
 import { resolve } from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
@@ -223,8 +223,12 @@ const ALLOWED_INGREDIENT_CATEGORIES = new Set([
 
 let hasTransientStatusLine = false;
 
+function formatLogTimestamp(): string {
+	return new Date().toISOString();
+}
+
 function writeTransientStatusLine(message: string): void {
-	process.stdout.write(`\r${message}`);
+	process.stdout.write(`\r[${formatLogTimestamp()}] ${message}`);
 	hasTransientStatusLine = true;
 }
 
@@ -237,12 +241,12 @@ function flushTransientStatusLine(): void {
 
 function logLine(message: string): void {
 	flushTransientStatusLine();
-	console.log(message);
+	console.log(`[${formatLogTimestamp()}] ${message}`);
 }
 
 function errorLine(message: string): void {
 	flushTransientStatusLine();
-	console.error(message);
+	console.error(`[${formatLogTimestamp()}] ${message}`);
 }
 
 function formatDuration(totalSeconds: number): string {
@@ -810,6 +814,7 @@ async function countDataLines(path: string): Promise<number> {
 
 async function upsertIngredient(
 	ingredientsCollection: Collection<IngredientDoc>,
+	ingredientIdCache: Map<string, ObjectId>,
 	namedIngredient: string,
 	rawIngredient: string,
 ): Promise<RecipeIngredient[]> {
@@ -831,6 +836,22 @@ async function upsertIngredient(
 			continue;
 		}
 
+		const cachedIngredientId = ingredientIdCache.get(normalizedName);
+		if (cachedIngredientId) {
+			const cachedKey = cachedIngredientId.toHexString();
+			if (seenIds.has(cachedKey)) {
+				continue;
+			}
+
+			seenIds.add(cachedKey);
+			refs.push({
+				ingredient: rawIngredient,
+				ingedientId: cachedIngredientId,
+				quantity,
+			});
+			continue;
+		}
+
 		let existing = (await ingredientsCollection.findOne({
 			name: normalizedName,
 		})) as IngredientDoc | null;
@@ -839,30 +860,41 @@ async function upsertIngredient(
 
 		if (existing?._id) {
 			ingredientId = existing._id;
+			ingredientIdCache.set(normalizedName, ingredientId);
 		} else {
 			const normalized = await normalizeIngredientWithGpt(normalizedName);
 			if (!normalized.isFood || !normalized.name) {
 				continue;
 			}
 
-			existing = (await ingredientsCollection.findOne({
-				name: normalized.name,
-			})) as IngredientDoc | null;
-
-			if (existing?._id) {
-				ingredientId = existing._id;
+			const normalizedCachedId = ingredientIdCache.get(normalized.name);
+			if (normalizedCachedId) {
+				ingredientId = normalizedCachedId;
+				ingredientIdCache.set(normalizedName, ingredientId);
 			} else {
-				const type = await classifyIngredientType(normalized.name);
-				const insert = await ingredientsCollection.insertOne({
+				existing = (await ingredientsCollection.findOne({
 					name: normalized.name,
-					type,
-					creationDate: new Date(),
-				} as IngredientDoc);
-				ingredientId = insert.insertedId;
-				logLine(
-					`Created Ingredient: ${normalized.name} (${type}) [${insert.insertedId.toHexString()}]`,
-				);
+				})) as IngredientDoc | null;
+
+				if (existing?._id) {
+					ingredientId = existing._id;
+				} else {
+					const type = await classifyIngredientType(normalized.name);
+					const insert = await ingredientsCollection.insertOne({
+						name: normalized.name,
+						type,
+						creationDate: new Date(),
+					} as IngredientDoc);
+					ingredientId = insert.insertedId;
+					logLine(
+						`Created Ingredient: ${normalized.name} (${type}) [${insert.insertedId.toHexString()}]`,
+					);
+				}
+
+				ingredientIdCache.set(normalized.name, ingredientId);
 			}
+
+			ingredientIdCache.set(normalizedName, ingredientId);
 		}
 
 		const key = ingredientId.toHexString();
@@ -922,6 +954,18 @@ async function resolveRecipeTitle(
 	return `${baseTitle} v${maxVersion + 1}`;
 }
 
+function isDuplicateKeyError(error: unknown): boolean {
+	if (error instanceof MongoServerError) {
+		return error.code === 11000;
+	}
+
+	if (typeof error === 'object' && error !== null && 'code' in error) {
+		return (error as { code?: unknown }).code === 11000;
+	}
+
+	return false;
+}
+
 async function importCsvData(): Promise<void> {
 	const client = new MongoClient(mongodbUri);
 
@@ -931,6 +975,7 @@ async function importCsvData(): Promise<void> {
 		const db = client.db(mongodbDb);
 		const ingredientsCollection = db.collection<IngredientDoc>('Ingredients');
 		const recipesCollection = db.collection<RecipeDoc>('Recipes');
+		const ingredientIdCache = new Map<string, ObjectId>();
 
 		await ingredientsCollection.createIndex({ name: 1 }, { unique: true });
 		await recipesCollection.createIndex({ title: 1 }, { unique: true });
@@ -938,11 +983,11 @@ async function importCsvData(): Promise<void> {
 
 		const totalRows = await countDataLines(DATASET_PATH);
 		if (totalRows === 0) {
-			console.log('No data rows found in CSV.');
+			logLine('No data rows found in CSV.');
 			return;
 		}
 
-		console.log(`Starting import for ${totalRows} rows.`);
+		logLine(`Starting import for ${totalRows} rows.`);
 
 		const rl = readline.createInterface({
 			input: createReadStream(DATASET_PATH),
@@ -1006,6 +1051,7 @@ async function importCsvData(): Promise<void> {
 
 					const refs = await upsertIngredient(
 						ingredientsCollection,
+						ingredientIdCache,
 						nerIngredient,
 						rawIngredient,
 					);
@@ -1014,20 +1060,35 @@ async function importCsvData(): Promise<void> {
 					}
 				}
 
-				const recipeTitle = await resolveRecipeTitle(
-					recipesCollection,
-					parsed.title,
-				);
+				let recipeTitle = parsed.title;
+				let recipeInsert;
 
-				const recipeDoc: RecipeDoc = {
-					title: recipeTitle,
+				const buildRecipeDoc = (title: string): RecipeDoc => ({
+					title,
 					ingredients: ingredientRefs,
 					directions: parsed.directions,
 					ner: parsed.nerIngredients.join(', '),
 					creationDate: new Date(),
-				};
+				});
 
-				const recipeInsert = await recipesCollection.insertOne(recipeDoc);
+				try {
+					recipeInsert = await recipesCollection.insertOne(
+						buildRecipeDoc(recipeTitle),
+					);
+				} catch (error) {
+					if (!isDuplicateKeyError(error)) {
+						throw error;
+					}
+
+					recipeTitle = await resolveRecipeTitle(
+						recipesCollection,
+						parsed.title,
+					);
+					recipeInsert = await recipesCollection.insertOne(
+						buildRecipeDoc(recipeTitle),
+					);
+				}
+
 				logLine(
 					`Created Recipe: ${recipeTitle} [${recipeInsert.insertedId.toHexString()}]`,
 				);
@@ -1068,11 +1129,11 @@ async function importCsvData(): Promise<void> {
 		}
 
 		flushTransientStatusLine();
-		console.log('Import complete.');
-		console.log(`Processed: ${processed}`);
-		console.log(`Inserted/Updated recipes: ${inserted}`);
-		console.log(`Skipped: ${skipped}`);
-		console.log(`Failed: ${failed}`);
+		logLine('Import complete.');
+		logLine(`Processed: ${processed}`);
+		logLine(`Inserted/Updated recipes: ${inserted}`);
+		logLine(`Skipped: ${skipped}`);
+		logLine(`Failed: ${failed}`);
 	} finally {
 		await client.close();
 	}
@@ -1080,6 +1141,6 @@ async function importCsvData(): Promise<void> {
 
 importCsvData().catch((error) => {
 	const message = error instanceof Error ? error.message : String(error);
-	console.error(`Import failed: ${message}`);
+	errorLine(`Import failed: ${message}`);
 	process.exitCode = 1;
 });

@@ -684,6 +684,9 @@ async function applyContainsReplaceRule(
 }
 
 async function fixIngredients(): Promise<void> {
+	if (!MONGODB_URI) {
+		throw new Error('MONGODB_URI is not defined');
+	}
 	const client = new MongoClient(MONGODB_URI);
 	await client.connect();
 
