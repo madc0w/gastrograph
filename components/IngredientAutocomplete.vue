@@ -26,7 +26,7 @@
 				role="option"
 				@mousedown.prevent="selectSuggestion(item.name)"
 			>
-				<span>{{ item.name }}</span>
+				<span v-html="highlightSuggestion(item.name)"></span>
 				<small v-if="showType">{{ item.type }}</small>
 			</li>
 		</ul>
@@ -79,6 +79,30 @@ const showSuggestions = computed(
 		suggestions.value.length > 0 &&
 		props.modelValue.trim().length > 0,
 );
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightSuggestion(name: string): string {
+	const query = props.modelValue.trim();
+	if (!query) {
+		return escapeHtml(name);
+	}
+
+	const safeName = escapeHtml(name);
+	const regex = new RegExp(`(${escapeRegExp(escapeHtml(query))})`, 'ig');
+	return safeName.replace(regex, '<strong>$1</strong>');
+}
 
 async function fetchSuggestions(input: string): Promise<void> {
 	if (!input.trim()) {

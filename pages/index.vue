@@ -459,7 +459,7 @@ const pathResults = ref<IngredientPath[]>([]);
 const pathHintText = ref('');
 const pathErrorText = ref('');
 const isPathLoading = ref(false);
-const pathUseLegacyQuery = ref(false);
+const isPathUseLegacyQuery = ref(false);
 
 const recipeModal = reactive<{
 	isVisible: boolean;
@@ -854,7 +854,7 @@ async function submitPathSearch(): Promise<void> {
 
 	isPathLoading.value = true;
 	pathErrorText.value = '';
-	const mode: PathQueryMode = pathUseLegacyQuery.value ? 'legacy' : 'fast';
+	const mode: PathQueryMode = isPathUseLegacyQuery.value ? 'legacy' : 'fast';
 	pathHintText.value =
 		mode === 'legacy'
 			? 'Searching recipe chains with old slow query...'

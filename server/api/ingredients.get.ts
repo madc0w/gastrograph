@@ -18,7 +18,7 @@ export default defineEventHandler(async (event) => {
 	const filter = q
 		? {
 				name: {
-					$regex: `^${escapeRegExp(q)}`,
+					$regex: escapeRegExp(q),
 					$options: 'i',
 				},
 			}

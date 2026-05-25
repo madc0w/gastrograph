@@ -52,6 +52,153 @@ const normalizedIngredientCache = new Map<
 	string,
 	{ name: string; isFood: boolean }
 >();
+const NON_INGREDIENT_TERMS = new Set([
+	'also',
+	'love',
+	'balloon',
+	'balloons',
+	'bake',
+	'taco',
+	'tacos',
+	'sandwich',
+	'sandwiches',
+	'cake',
+	'cakes',
+	'angel',
+	'wrapper',
+	'wrappers',
+]);
+const NON_INGREDIENT_PHRASES = new Set(['chocolate fudge cake']);
+const EXACT_DELETE_INGREDIENT_NAMES = new Set([
+	'all-purpose seasoning',
+	'batter',
+	'cracker barrel',
+	'dough',
+	'fry',
+	'herb',
+	'herb blend',
+	'herb mix',
+	'herbs',
+	'instant chocolate',
+	'instant chicken',
+	'mixed herbs',
+	'new',
+	'nestle',
+	'paraffin wax',
+	'sauce',
+	'soup',
+	'spaghetti dinner',
+]);
+const EXACT_CANONICAL_REPLACEMENTS = new Map<string, string>([
+	['all-purpose flour', 'flour'],
+	['andouille', 'andouille sausage'],
+	['bay', 'bay leaf'],
+	['beef tips', 'beef tip'],
+	['bread crumbs', 'breadcrumbs'],
+	['bread-crumbs', 'breadcrumbs'],
+	['breast', 'chicken breast'],
+	['catsup', 'ketchup'],
+	['chicken gumbo', 'chicken gumbo soup'],
+	['chicken mushroom', 'chicken mushroom soup'],
+	['chile', 'chili'],
+	['chocolate chips', 'chocolate chip'],
+	['chocolate fudge topping', 'chocolate fudge frosting'],
+	['consomme', 'consommé'],
+	['cooking sherry', 'sherry'],
+	['coriander', 'coriander seed'],
+	['cornflake', 'cornflakes'],
+	['crabmeat', 'crab meat'],
+	['cracklings', 'crackling'],
+	['cranberries', 'cranberry'],
+	['cranberry bean', 'cranberry'],
+	['cranberry orange relish', 'cranberry-orange relish'],
+	['cream cheese filling', 'cream cheese'],
+	['cream of mushroom', 'cream of mushroom soup'],
+	['creme', 'cream'],
+	['crescent rolls', 'crescent roll'],
+	['crisco oil', 'crisco'],
+	['crisp rice cereal', 'crispy rice cereal'],
+	['croutons', 'crouton'],
+	['deer meat', 'deer'],
+	['egg nog', 'eggnog'],
+	['fusilli', 'fusilli pasta'],
+	['frying chicken', 'chicken'],
+	['frozen vegetable mix', 'frozen vegetables'],
+	['glutamate', 'monosodium glutamate'],
+	['green peas', 'green pea'],
+	['grenadine', 'grenadine syrup'],
+	['ground cayenne', 'cayenne'],
+	['ground cayenne pepper', 'cayenne'],
+	['hash brown', 'hash browns'],
+	['hash brown potato', 'hash browns'],
+	['hash brown potatoes', 'hash browns'],
+	['heath bar chips', 'heath bar'],
+	['heath bits', 'heath bar'],
+	['heath candy bar', 'heath bar'],
+	['honeydew', 'honeydew melon'],
+	['imitation crabmeat', 'imitation crab'],
+	['irish whiskey', 'whiskey'],
+	['jalapeno', 'jalapeño'],
+	['lentils', 'lentil'],
+	['meatballs', 'meatball'],
+	["miniature reese's", "mini reese's"],
+	['miniature marshmallows', 'mini marshmallows'],
+	['monterey jack', 'monterey jack cheese'],
+	['mozzarella', 'mozzarella cheese'],
+	['muenster', 'muenster cheese'],
+	['navy beans', 'navy bean'],
+	['oat', 'oats'],
+	['olives', 'olive'],
+	['orange flavored drink', 'orange drink'],
+	['oreo', 'oreo cookie'],
+	['parmesan', 'parmesan cheese'],
+	['potato chips', 'potato chip'],
+	['pretzels', 'pretzel'],
+	['process cheese', 'processed cheese'],
+	['provolone', 'provolone cheese'],
+	['pumpkin pie filling', 'pumpkin filling'],
+	['ramen', 'ramen noodles'],
+	['ramen noodle', 'ramen noodles'],
+	['ranch', 'ranch dressing'],
+	['ranch-style salad dressing', 'ranch dressing'],
+	['raspberries', 'raspberry'],
+	['red hot', 'red hot candy'],
+	['red hot cinnamon', 'red hot candy'],
+	['red karo', 'red karo syrup'],
+	['rice chex', 'rice chex cereal'],
+	['ricotta', 'ricotta cheese'],
+	['romano', 'romano cheese'],
+	['ro-tel', 'ro-tel chili'],
+	['rye whiskey', 'whiskey'],
+	['saltine', 'saltine cracker'],
+	['sausage meat', 'sausage'],
+	['sherry cooking wine', 'sherry'],
+	['sherry wine', 'sherry'],
+	['sharp cheddar', 'sharp cheddar cheese'],
+	['snickers', 'snickers bar'],
+	['snow peas', 'snow pea'],
+	['soda crackers', 'soda cracker'],
+	['strawberries', 'strawberry'],
+	['tabasco', 'tabasco sauce'],
+	['tomato ketchup', 'ketchup'],
+	['tomato pate', 'tomato paste'],
+	['tuna steak', 'tuna'],
+	['velveeta', 'velveeta cheese'],
+	['wing', 'chicken wing'],
+	['worcestershire', 'worcestershire sauce'],
+	['yellow lima beans', 'yellow lima bean'],
+	['7 up', '7-up soda'],
+	['7-up', '7-up soda'],
+	['all bran', 'all-bran cereal'],
+	['all-bran', 'all-bran cereal'],
+	['broccoli florets', 'broccoli'],
+	['egg noodles', 'egg noodle'],
+	['graham cracker crumbs', 'graham cracker crumb'],
+	['jello', 'jell-o'],
+	['lemon jello', 'lemon jell-o'],
+	['tater', 'potato'],
+	['taters', 'potato'],
+]);
 const ALLOWED_INGREDIENT_CATEGORIES = new Set([
 	'beef',
 	'fish',
@@ -165,6 +312,74 @@ function normalizeIngredientName(name: string): string {
 		.replace(/\s+/g, ' ')
 		.trim()
 		.toLowerCase();
+}
+
+function applyIngredientCanonicalRules(name: string): string {
+	let normalized = normalizeIngredientName(name);
+	normalized = normalized.replace(/\bjello\b/g, 'jell-o');
+	normalized = normalized.replace(/\bbread\s*[- ]\s*crumbs\b/g, 'breadcrumbs');
+	normalized = normalized.replace(
+		/\bsemi\s*[- ]?sweet chocolate (?:chips|morsels|pieces)\b/g,
+		'chocolate chips',
+	);
+
+	const exactMapped = EXACT_CANONICAL_REPLACEMENTS.get(normalized);
+	if (exactMapped) {
+		normalized = exactMapped;
+	}
+
+	return normalizeIngredientName(normalized);
+}
+
+function isBlockedNonIngredient(name: string): boolean {
+	const normalized = applyIngredientCanonicalRules(name);
+	if (!normalized) {
+		return true;
+	}
+
+	if (NON_INGREDIENT_TERMS.has(normalized)) {
+		return true;
+	}
+
+	if (NON_INGREDIENT_PHRASES.has(normalized)) {
+		return true;
+	}
+
+	if (EXACT_DELETE_INGREDIENT_NAMES.has(normalized)) {
+		return true;
+	}
+
+	return false;
+}
+
+function splitIngredientCandidates(raw: string): string[] {
+	const source = cleanIngredientName(raw);
+	if (!source) {
+		return [];
+	}
+
+	const rewritten = source
+		.replace(/\band\/or\b/gi, ',')
+		.replace(/\bor\b/gi, ',')
+		.replace(/\band\b/gi, ',');
+
+	const parts = rewritten
+		.split(',')
+		.map((part) => cleanIngredientName(part))
+		.map((part) =>
+			part
+				.replace(/^or\s+/i, '')
+				.replace(/^and\s+/i, '')
+				.trim(),
+		)
+		.filter((part) => part.length > 0)
+		.filter((part) => !/^(and|or)$/i.test(part));
+
+	if (parts.length <= 1) {
+		return [source];
+	}
+
+	return parts;
 }
 
 function splitQuantityAndName(raw: string): { quantity: string; name: string } {
@@ -300,7 +515,7 @@ function heuristicIngredientType(name: string): string | null {
 			keys: ['apple', 'banana', 'lemon', 'lime', 'orange', 'berry'],
 		},
 		{
-			type: 'cheeses',
+			type: 'cheese',
 			keys: ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'feta'],
 		},
 		{ type: 'dairy', keys: ['milk', 'cream', 'yogurt', 'butter'] },
@@ -339,7 +554,7 @@ async function classifyIngredientType(name: string): Promise<string> {
 
 	const prompt = [
 		'Classify the ingredient into exactly one category from this allowed list:',
-		'beef, fish, poultry, pork, vegetable, fruit, cheeses, spice, dairy, grain, herb, oil, sweetener, condiment, legume, nut, other.',
+		'beef, fish, poultry, pork, vegetable, fruit, cheese, spice, dairy, grain, herb, oil, sweetener, condiment, legume, nut, other.',
 		'Use culinary meaning, not naive substring matching.',
 		'Rules:',
 		'- seasoning powders and dried seasonings (for example garlic powder, onion powder, chili powder) => spice.',
@@ -406,9 +621,15 @@ async function classifyIngredientType(name: string): Promise<string> {
 async function normalizeIngredientWithGpt(
 	rawName: string,
 ): Promise<{ name: string; isFood: boolean }> {
-	const seed = normalizeIngredientName(rawName);
+	const seed = applyIngredientCanonicalRules(rawName);
 	if (!seed) {
 		return { name: '', isFood: false };
+	}
+
+	if (isBlockedNonIngredient(seed)) {
+		const blocked = { name: '', isFood: false };
+		normalizedIngredientCache.set(seed, blocked);
+		return blocked;
 	}
 
 	if (normalizedIngredientCache.has(seed)) {
@@ -424,9 +645,12 @@ async function normalizeIngredientWithGpt(
 		'- Remove quantity and units.',
 		'- Remove prep instructions/adjectives (for example "banana, mashed" => "banana").',
 		'- Depluralize (for example "bananas" => "banana").',
+		'- Convert "jello" to "jell-o".',
+		'- Convert "tater" or "taters" to "potato".',
+		'- Convert "broccoli florets" to "broccoli".',
 		'- Fix obvious spelling mistakes (for example "bakon" => "bacon").',
 		'- Minimize to the fewest words that preserve ingredient identity (for example "beef bouillon concentrate" => "beef bouillon").',
-		'- Reject non-food words or actions (for example "also", "love", "balloons", "bake").',
+		'- Reject non-food words or actions (for example "also", "love", "balloons", "bake", "taco", "sandwich", "cake", "angel", "chocolate fudge cake", "wrapper").',
 		'Respond with strict JSON only, no markdown:',
 		'{"isFood": boolean, "name": string}',
 		'If not a valid food ingredient, return {"isFood": false, "name": ""}.',
@@ -481,10 +705,10 @@ async function normalizeIngredientWithGpt(
 
 		const isFood = parsed.isFood === true;
 		const normalized = isFood
-			? normalizeIngredientName(String(parsed.name ?? ''))
+			? applyIngredientCanonicalRules(String(parsed.name ?? ''))
 			: '';
 
-		if (!isFood || !normalized) {
+		if (!isFood || !normalized || isBlockedNonIngredient(normalized)) {
 			const rejected = { name: '', isFood: false };
 			normalizedIngredientCache.set(seed, rejected);
 			return rejected;
@@ -562,50 +786,69 @@ async function upsertIngredient(
 	ingredientsCollection: Collection<IngredientDoc>,
 	namedIngredient: string,
 	rawIngredient: string,
-): Promise<RecipeIngredient | null> {
+): Promise<RecipeIngredient[]> {
 	const split = splitQuantityAndName(rawIngredient);
 	const quantity = split.quantity;
-	const normalizedName = normalizeIngredientName(namedIngredient);
+	const candidates = splitIngredientCandidates(namedIngredient);
 
-	if (!normalizedName) {
-		return null;
+	if (candidates.length === 0) {
+		return [];
 	}
 
-	let existing = (await ingredientsCollection.findOne({
-		name: normalizedName,
-	})) as IngredientDoc | null;
+	const refs: RecipeIngredient[] = [];
+	const seenIds = new Set<string>();
 
-	let ingredientId: ObjectId;
+	for (const candidate of candidates) {
+		const normalizedName = applyIngredientCanonicalRules(candidate);
 
-	if (existing?._id) {
-		ingredientId = existing._id;
-	} else {
-		const normalized = await normalizeIngredientWithGpt(normalizedName);
-		if (!normalized.isFood || !normalized.name) {
-			return null;
+		if (!normalizedName || isBlockedNonIngredient(normalizedName)) {
+			continue;
 		}
 
-		existing = (await ingredientsCollection.findOne({
-			name: normalized.name,
+		let existing = (await ingredientsCollection.findOne({
+			name: normalizedName,
 		})) as IngredientDoc | null;
+
+		let ingredientId: ObjectId;
 
 		if (existing?._id) {
 			ingredientId = existing._id;
 		} else {
-			const type = await classifyIngredientType(normalized.name);
-			const insert = await ingredientsCollection.insertOne({
+			const normalized = await normalizeIngredientWithGpt(normalizedName);
+			if (!normalized.isFood || !normalized.name) {
+				continue;
+			}
+
+			existing = (await ingredientsCollection.findOne({
 				name: normalized.name,
-				type,
-			} as IngredientDoc);
-			ingredientId = insert.insertedId;
+			})) as IngredientDoc | null;
+
+			if (existing?._id) {
+				ingredientId = existing._id;
+			} else {
+				const type = await classifyIngredientType(normalized.name);
+				const insert = await ingredientsCollection.insertOne({
+					name: normalized.name,
+					type,
+				} as IngredientDoc);
+				ingredientId = insert.insertedId;
+			}
 		}
+
+		const key = ingredientId.toHexString();
+		if (seenIds.has(key)) {
+			continue;
+		}
+
+		seenIds.add(key);
+		refs.push({
+			ingredient: rawIngredient,
+			ingedientId: ingredientId,
+			quantity,
+		});
 	}
 
-	return {
-		ingredient: rawIngredient,
-		ingedientId: ingredientId,
-		quantity,
-	};
+	return refs;
 }
 
 async function resolveRecipeTitle(
@@ -731,13 +974,13 @@ async function importCsvData(): Promise<void> {
 						lastRowHeartbeatAt = heartbeatNow;
 					}
 
-					const ref = await upsertIngredient(
+					const refs = await upsertIngredient(
 						ingredientsCollection,
 						nerIngredient,
 						rawIngredient,
 					);
-					if (ref) {
-						ingredientRefs.push(ref);
+					if (refs.length > 0) {
+						ingredientRefs.push(...refs);
 					}
 				}
 
