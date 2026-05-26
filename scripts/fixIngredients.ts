@@ -82,6 +82,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		reason: 'canonicalize variant',
 	},
 	{
+		needle: 'dry breadcrumbs',
+		replacement: 'breadcrumbs',
+		reason: 'remove preparation descriptor',
+	},
+	{
 		needle: 'jalapeno',
 		replacement: 'jalapeño',
 		reason: 'spelling normalization',
@@ -270,6 +275,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		replacement: 'whiskey',
 		reason: 'canonical spirit name',
 	},
+	{
+		needle: 'light red kidney bean',
+		replacement: 'kidney bean',
+		reason: 'canonicalize bean variety',
+	},
 	{ needle: 'lentils', replacement: 'lentil', reason: 'depluralize' },
 	{ needle: 'meatballs', replacement: 'meatball', reason: 'depluralize' },
 	{
@@ -281,6 +291,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		needle: 'miniature marshmallows',
 		replacement: 'mini marshmallows',
 		reason: 'canonical descriptor',
+	},
+	{
+		needle: 'minced onion',
+		replacement: 'onion',
+		reason: 'remove cut descriptor',
 	},
 	{
 		needle: 'monterey jack',

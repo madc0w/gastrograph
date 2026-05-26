@@ -7,6 +7,7 @@ type IngredientRow = {
 	_id: string;
 	name: string;
 	type: string;
+	creationDate: string;
 };
 
 const { MONGODB_URI, MONGODB_DB, INGREDIENTS_CSV_PATH } = process.env;
@@ -35,12 +36,13 @@ function escapeCsvValue(value: string): string {
 }
 
 function toCsv(rows: IngredientRow[]): string {
-	const header = '_id,name,type';
+	const header = '_id,name,type,creationDate';
 	const lines = rows.map((row) =>
 		[
 			escapeCsvValue(row._id),
 			escapeCsvValue(row.name),
 			escapeCsvValue(row.type),
+			escapeCsvValue(row.creationDate),
 		].join(','),
 	);
 	return `${header}\n${lines.join('\n')}\n`;
@@ -77,14 +79,18 @@ async function extractIngredients(): Promise<void> {
 		const ingredientsCollection = await getIngredientCollection(db);
 
 		const rawDocs = await ingredientsCollection
-			.find({}, { projection: { _id: 1, name: 1, type: 1 } })
-			.sort({ name: 1 })
+			.find({}, { projection: { _id: 1, name: 1, type: 1, creationDate: 1 } })
+			.sort({ creationDate: 1, name: 1 })
 			.toArray();
 
 		const rows: IngredientRow[] = rawDocs.map((doc) => ({
 			_id: String(doc._id ?? ''),
 			name: String(doc.name ?? ''),
 			type: String(doc.type ?? ''),
+			creationDate:
+				doc.creationDate instanceof Date
+					? doc.creationDate.toISOString()
+					: String(doc.creationDate ?? ''),
 		}));
 
 		const csv = toCsv(rows);
