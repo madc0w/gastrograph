@@ -93,13 +93,18 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function capitalizeWords(value: string): string {
+	return value.replace(/\b([A-Za-z])/g, (letter) => letter.toUpperCase());
+}
+
 function highlightSuggestion(name: string): string {
 	const query = props.modelValue.trim();
+	const displayName = capitalizeWords(name);
 	if (!query) {
-		return escapeHtml(name);
+		return escapeHtml(displayName);
 	}
 
-	const safeName = escapeHtml(name);
+	const safeName = escapeHtml(displayName);
 	const regex = new RegExp(`(${escapeRegExp(escapeHtml(query))})`, 'ig');
 	return safeName.replace(regex, '<strong>$1</strong>');
 }
@@ -261,7 +266,6 @@ input:focus {
 	padding: 0.45rem 0.55rem;
 	border-radius: 8px;
 	cursor: pointer;
-	text-transform: capitalize;
 }
 
 .suggestion small {

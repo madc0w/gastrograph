@@ -968,13 +968,11 @@ async function submitPathSearch(): Promise<void> {
 		pathResults.value = response.paths.slice(0, 8);
 
 		if (response.paths.length > 0) {
-			pathHintText.value =
-				mode === 'legacy'
-					? `Found ${response.paths.length} shortest recipe chains (old query).`
-					: `Found ${response.paths.length} shortest recipe chains (fast query).`;
+			pathHintText.value = `Found ${response.paths.length} shortest recipe chains ${
+				mode === 'legacy' ? '(legacy query).' : ''
+			}`;
 		} else {
-			pathHintText.value =
-				'No connecting chain was found within the search depth.';
+			pathHintText.value = 'No connecting chain found';
 		}
 	} catch (error: unknown) {
 		if (requestId !== pathSearchRequestId) {
