@@ -283,7 +283,7 @@
 									v-for="(recipe, recipeIndex) in path.recipeChain"
 									:key="`${recipe.title}-${recipeIndex}`"
 								>
-									<strong>
+									<strong class="pathRecipeName">
 										<button
 											type="button"
 											class="recipeButton"
@@ -292,9 +292,14 @@
 											{{ recipe.title }}
 										</button>
 									</strong>
-									uses
-									{{ path.ingredientChain[recipeIndex] }} and
-									{{ path.ingredientChain[recipeIndex + 1] }}
+									<span class="pathVerb">uses</span>
+									<span class="pathIngredientName">{{
+										path.ingredientChain[recipeIndex]
+									}}</span>
+									<span class="pathVerb">and</span>
+									<span class="pathIngredientName">{{
+										path.ingredientChain[recipeIndex + 1]
+									}}</span>
 								</li>
 							</ol>
 						</li>
@@ -1527,6 +1532,40 @@ h1 {
 .pathSteps > li {
 	margin: 0;
 	color: #495057;
+}
+
+.pathRecipeName {
+	display: inline-block;
+	margin-right: 0.35rem;
+	padding: 0.05rem 0.3rem;
+	border-radius: 6px;
+	background: linear-gradient(
+		135deg,
+		rgba(40, 54, 24, 0.14),
+		rgba(96, 108, 56, 0.18)
+	);
+	box-shadow: inset 0 0 0 1px rgba(40, 54, 24, 0.22);
+	color: #1b2b0e;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.pathIngredientName {
+	display: inline-block;
+	margin: 0 0.12rem;
+	padding: 0.04rem 0.35rem;
+	border-radius: 999px;
+	background: rgba(255, 209, 102, 0.22);
+	box-shadow: inset 0 0 0 1px rgba(188, 108, 37, 0.34);
+	color: #7f3b08;
+	font-weight: 600;
+	line-height: 1.35;
+	text-transform: lowercase;
+}
+
+.pathVerb {
+	color: #6c757d;
+	font-size: 0.92em;
 }
 
 .pathEmpty {

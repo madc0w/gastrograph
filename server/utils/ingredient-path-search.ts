@@ -11,6 +11,7 @@ type RecipeDoc = {
 	title?: string;
 	ingredients?: Array<{
 		ingedientId?: ObjectId;
+		ingredientId?: ObjectId;
 	}>;
 };
 
@@ -145,10 +146,9 @@ export async function findIngredientPaths(input: {
 	}
 
 	const neighborCache = new Map<string, IngredientNeighbor[]>();
-	const maxHops = 5;
-	const maxBranch = 12;
-	const maxQueue = 2500;
-	const maxRuntimeMs = 5000;
+	const maxHops = 6;
+	const maxQueue = 6000;
+	const maxRuntimeMs = 30000;
 	const startedAt = Date.now();
 
 	const directPaths = (await recipes
@@ -157,8 +157,22 @@ export async function findIngredientPaths(input: {
 				$match: {
 					ingredients: {
 						$all: [
-							{ $elemMatch: { ingedientId: fromIngredient._id } },
-							{ $elemMatch: { ingedientId: toIngredient._id } },
+							{
+								$elemMatch: {
+									$or: [
+										{ ingedientId: fromIngredient._id },
+										{ ingredientId: fromIngredient._id },
+									],
+								},
+							},
+							{
+								$elemMatch: {
+									$or: [
+										{ ingedientId: toIngredient._id },
+										{ ingredientId: toIngredient._id },
+									],
+								},
+							},
 						],
 					},
 				},
@@ -204,7 +218,10 @@ export async function findIngredientPaths(input: {
 			.aggregate<NeighborAgg>([
 				{
 					$match: {
-						'ingredients.ingedientId': ingredientId,
+						$or: [
+							{ 'ingredients.ingedientId': ingredientId },
+							{ 'ingredients.ingredientId': ingredientId },
+						],
 					},
 				},
 				{
@@ -215,19 +232,30 @@ export async function findIngredientPaths(input: {
 				},
 				{ $unwind: '$ingredients' },
 				{
+					$addFields: {
+						ingredientNeighborId: {
+							$ifNull: [
+								'$ingredients.ingedientId',
+								'$ingredients.ingredientId',
+							],
+						},
+					},
+				},
+				{
 					$match: {
-						'ingredients.ingedientId': { $ne: ingredientId },
+						ingredientNeighborId: {
+							$ne: ingredientId,
+						},
 					},
 				},
 				{
 					$group: {
-						_id: '$ingredients.ingedientId',
+						_id: '$ingredientNeighborId',
 						count: { $sum: 1 },
 						recipeTitle: { $min: '$title' },
 					},
 				},
 				{ $sort: { count: -1 } },
-				{ $limit: 200 },
 			])
 			.toArray()) as NeighborAgg[];
 
@@ -268,6 +296,136 @@ export async function findIngredientPaths(input: {
 		neighborCache.set(idKey, neighbors);
 		return neighbors;
 	};
+
+	const targetNeighbors = await getNeighbors(toIngredient._id);
+	const targetNeighborIds = new Set<string>(
+		targetNeighbors.map((neighbor) => String(neighbor.id)),
+	);
+	const targetNeighborById = new Map<string, IngredientNeighbor>(
+		targetNeighbors.map((neighbor) => [String(neighbor.id), neighbor]),
+	);
+	const targetNeighborCountById = new Map<string, number>(
+		targetNeighbors.map((neighbor) => [String(neighbor.id), neighbor.count]),
+	);
+
+	const fromNeighbors = await getNeighbors(fromIngredient._id);
+	const twoHopPaths = fromNeighbors
+		.map((neighbor) => {
+			const connectorId = String(neighbor.id);
+			if (
+				connectorId === String(fromIngredient._id) ||
+				connectorId === String(toIngredient._id)
+			) {
+				return null;
+			}
+
+			const targetSideNeighbor = targetNeighborById.get(connectorId);
+			if (!targetSideNeighbor) {
+				return null;
+			}
+
+			return {
+				path: {
+					ingredientChain: [
+						fromIngredient.name,
+						neighbor.name,
+						toIngredient.name,
+					],
+					recipeChain: [
+						{ title: neighbor.recipeTitle },
+						{ title: targetSideNeighbor.recipeTitle },
+					],
+					hops: 2,
+				} as IngredientPath,
+				score: neighbor.count + targetSideNeighbor.count,
+			};
+		})
+		.filter(
+			(
+				item,
+			): item is {
+				path: IngredientPath;
+				score: number;
+			} => Boolean(item),
+		)
+		.sort((left, right) => {
+			if (left.score !== right.score) {
+				return right.score - left.score;
+			}
+			return left.path.ingredientChain[1].localeCompare(
+				right.path.ingredientChain[1],
+			);
+		})
+		.slice(0, limit)
+		.map((item) => item.path);
+
+	if (twoHopPaths.length > 0) {
+		return {
+			from: {
+				id: String(fromIngredient._id),
+				name: fromIngredient.name,
+			},
+			to: {
+				id: String(toIngredient._id),
+				name: toIngredient.name,
+			},
+			paths: twoHopPaths,
+		};
+	}
+
+	const prioritizeNeighbors = (
+		neighbors: IngredientNeighbor[],
+		currentIngredientId: ObjectId,
+	): IngredientNeighbor[] => {
+		const currentId = String(currentIngredientId);
+		const targetId = String(toIngredient._id);
+
+		return [...neighbors].sort((left, right) => {
+			const leftId = String(left.id);
+			const rightId = String(right.id);
+
+			const leftIsTarget = leftId === targetId;
+			const rightIsTarget = rightId === targetId;
+			if (leftIsTarget !== rightIsTarget) {
+				return leftIsTarget ? -1 : 1;
+			}
+
+			const leftBridgesToTarget =
+				currentId !== targetId && targetNeighborIds.has(leftId);
+			const rightBridgesToTarget =
+				currentId !== targetId && targetNeighborIds.has(rightId);
+			if (leftBridgesToTarget !== rightBridgesToTarget) {
+				return leftBridgesToTarget ? -1 : 1;
+			}
+
+			if (leftBridgesToTarget && rightBridgesToTarget) {
+				const leftTargetCount = targetNeighborCountById.get(leftId) || 0;
+				const rightTargetCount = targetNeighborCountById.get(rightId) || 0;
+				if (leftTargetCount !== rightTargetCount) {
+					return rightTargetCount - leftTargetCount;
+				}
+			}
+
+			if (left.count !== right.count) {
+				return right.count - left.count;
+			}
+
+			return left.name.localeCompare(right.name);
+		});
+	};
+
+	function getBranchLimit(hops: number): number {
+		if (hops <= 0) {
+			return 320;
+		} else if (hops === 1) {
+			return 120;
+		} else if (hops === 2) {
+			return 60;
+		} else if (hops === 3) {
+			return 36;
+		}
+		return 22;
+	}
 
 	const queue: PathState[] = [
 		{
@@ -312,8 +470,12 @@ export async function findIngredientPaths(input: {
 			continue;
 		}
 
-		const neighbors = await getNeighbors(currentIngredientId);
-		for (const neighbor of neighbors.slice(0, maxBranch)) {
+		const neighbors = prioritizeNeighbors(
+			await getNeighbors(currentIngredientId),
+			currentIngredientId,
+		);
+		const branchLimit = getBranchLimit(hops);
+		for (const neighbor of neighbors.slice(0, branchLimit)) {
 			const neighborIdString = String(neighbor.id);
 			const alreadyVisited = state.ingredientIds.some(
 				(id) => String(id) === neighborIdString,
@@ -429,7 +591,10 @@ export async function findIngredientPathsLegacy(input: {
 			.aggregate<LegacyNeighborAgg>([
 				{
 					$match: {
-						'ingredients.ingedientId': ingredientId,
+						$or: [
+							{ 'ingredients.ingedientId': ingredientId },
+							{ 'ingredients.ingredientId': ingredientId },
+						],
 					},
 				},
 				{
@@ -440,8 +605,20 @@ export async function findIngredientPathsLegacy(input: {
 				},
 				{ $unwind: '$ingredients' },
 				{
+					$addFields: {
+						ingredientNeighborId: {
+							$ifNull: [
+								'$ingredients.ingedientId',
+								'$ingredients.ingredientId',
+							],
+						},
+					},
+				},
+				{
 					$match: {
-						'ingredients.ingedientId': { $ne: ingredientId },
+						ingredientNeighborId: {
+							$ne: ingredientId,
+						},
 					},
 				},
 				{
@@ -451,7 +628,7 @@ export async function findIngredientPathsLegacy(input: {
 				},
 				{
 					$group: {
-						_id: '$ingredients.ingedientId',
+						_id: '$ingredientNeighborId',
 						count: { $sum: 1 },
 						recipe: {
 							$first: {
