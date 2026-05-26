@@ -4,6 +4,9 @@ type IngredientDoc = {
 	_id: ObjectId;
 	name: string;
 	type?: string;
+	recipeCount?: number;
+	usageCount?: number;
+	usageFrequency?: number;
 };
 
 type RecipeDoc = {
@@ -11,7 +14,6 @@ type RecipeDoc = {
 	title?: string;
 	ingredients?: Array<{
 		ingedientId?: ObjectId;
-		ingredientId?: ObjectId;
 	}>;
 };
 
@@ -159,18 +161,12 @@ export async function findIngredientPaths(input: {
 						$all: [
 							{
 								$elemMatch: {
-									$or: [
-										{ ingedientId: fromIngredient._id },
-										{ ingredientId: fromIngredient._id },
-									],
+									ingedientId: fromIngredient._id,
 								},
 							},
 							{
 								$elemMatch: {
-									$or: [
-										{ ingedientId: toIngredient._id },
-										{ ingredientId: toIngredient._id },
-									],
+									ingedientId: toIngredient._id,
 								},
 							},
 						],
@@ -218,10 +214,7 @@ export async function findIngredientPaths(input: {
 			.aggregate<NeighborAgg>([
 				{
 					$match: {
-						$or: [
-							{ 'ingredients.ingedientId': ingredientId },
-							{ 'ingredients.ingredientId': ingredientId },
-						],
+						'ingredients.ingedientId': ingredientId,
 					},
 				},
 				{
@@ -234,10 +227,7 @@ export async function findIngredientPaths(input: {
 				{
 					$addFields: {
 						ingredientNeighborId: {
-							$ifNull: [
-								'$ingredients.ingedientId',
-								'$ingredients.ingredientId',
-							],
+							$ifNull: ['$ingredients.ingedientId', null],
 						},
 					},
 				},
@@ -297,6 +287,44 @@ export async function findIngredientPaths(input: {
 		return neighbors;
 	};
 
+	const totalRecipeCountPromise = recipes.estimatedDocumentCount();
+
+	const getCachedIngredientRecipeFrequency = async (
+		ingredientIds: ObjectId[],
+	): Promise<Map<string, number>> => {
+		const uniqueIdsByKey = new Map<string, ObjectId>();
+		for (const ingredientId of ingredientIds) {
+			uniqueIdsByKey.set(String(ingredientId), ingredientId);
+		}
+
+		const uniqueIds = Array.from(uniqueIdsByKey.values());
+		if (uniqueIds.length === 0) {
+			return new Map<string, number>();
+		}
+
+		const ingredientDocs = await ingredients
+			.find(
+				{ _id: { $in: uniqueIds } },
+				{ projection: { recipeCount: 1, usageCount: 1, usageFrequency: 1 } },
+			)
+			.toArray();
+
+		const frequencies = new Map<string, number>();
+		for (const doc of ingredientDocs) {
+			const frequencyRaw =
+				typeof doc.recipeCount === 'number'
+					? doc.recipeCount
+					: typeof doc.usageCount === 'number'
+						? doc.usageCount
+						: typeof doc.usageFrequency === 'number'
+							? doc.usageFrequency
+							: 1;
+			frequencies.set(String(doc._id), Math.max(1, frequencyRaw));
+		}
+
+		return frequencies;
+	};
+
 	const targetNeighbors = await getNeighbors(toIngredient._id);
 	const targetNeighborIds = new Set<string>(
 		targetNeighbors.map((neighbor) => String(neighbor.id)),
@@ -309,7 +337,7 @@ export async function findIngredientPaths(input: {
 	);
 
 	const fromNeighbors = await getNeighbors(fromIngredient._id);
-	const twoHopPaths = fromNeighbors
+	const twoHopCandidates = fromNeighbors
 		.map((neighbor) => {
 			const connectorId = String(neighbor.id);
 			if (
@@ -325,29 +353,79 @@ export async function findIngredientPaths(input: {
 			}
 
 			return {
-				path: {
-					ingredientChain: [
-						fromIngredient.name,
-						neighbor.name,
-						toIngredient.name,
-					],
-					recipeChain: [
-						{ title: neighbor.recipeTitle },
-						{ title: targetSideNeighbor.recipeTitle },
-					],
-					hops: 2,
-				} as IngredientPath,
-				score: neighbor.count + targetSideNeighbor.count,
+				connectorId: neighbor.id,
+				connectorName: neighbor.name,
+				fromToConnectorCount: neighbor.count,
+				toToConnectorCount: targetSideNeighbor.count,
+				recipeChain: [
+					{ title: neighbor.recipeTitle },
+					{ title: targetSideNeighbor.recipeTitle },
+				],
 			};
 		})
 		.filter(
 			(
 				item,
 			): item is {
-				path: IngredientPath;
-				score: number;
+				connectorId: ObjectId;
+				connectorName: string;
+				fromToConnectorCount: number;
+				toToConnectorCount: number;
+				recipeChain: PathRecipeStep[];
 			} => Boolean(item),
-		)
+		);
+
+	const totalRecipeCount = Math.max(1, await totalRecipeCountPromise);
+	const ingredientRecipeFrequencyById = await getCachedIngredientRecipeFrequency([
+		fromIngredient._id,
+		toIngredient._id,
+		...twoHopCandidates.map((candidate) => candidate.connectorId),
+	]);
+
+	const fromRecipeFrequency = Math.max(
+		1,
+		ingredientRecipeFrequencyById.get(String(fromIngredient._id)) || 1,
+	);
+	const toRecipeFrequency = Math.max(
+		1,
+		ingredientRecipeFrequencyById.get(String(toIngredient._id)) || 1,
+	);
+
+	const twoHopPaths = twoHopCandidates
+		.map((candidate) => {
+			const connectorId = String(candidate.connectorId);
+			const connectorRecipeFrequency = Math.max(
+				1,
+				ingredientRecipeFrequencyById.get(connectorId) || 1,
+			);
+
+			const connectorIdf = Math.log(
+				(totalRecipeCount + 1) / (connectorRecipeFrequency + 1),
+			);
+
+			const fromAssoc =
+				candidate.fromToConnectorCount /
+				Math.sqrt(fromRecipeFrequency * connectorRecipeFrequency);
+			const toAssoc =
+				candidate.toToConnectorCount /
+				Math.sqrt(toRecipeFrequency * connectorRecipeFrequency);
+
+			const score =
+				connectorIdf + 0.75 * (Math.log1p(fromAssoc) + Math.log1p(toAssoc));
+
+			return {
+				path: {
+					ingredientChain: [
+						fromIngredient.name,
+						candidate.connectorName,
+						toIngredient.name,
+					],
+					recipeChain: candidate.recipeChain,
+					hops: 2,
+				} as IngredientPath,
+				score,
+			};
+		})
 		.sort((left, right) => {
 			if (left.score !== right.score) {
 				return right.score - left.score;
@@ -591,10 +669,7 @@ export async function findIngredientPathsLegacy(input: {
 			.aggregate<LegacyNeighborAgg>([
 				{
 					$match: {
-						$or: [
-							{ 'ingredients.ingedientId': ingredientId },
-							{ 'ingredients.ingredientId': ingredientId },
-						],
+						'ingredients.ingedientId': ingredientId,
 					},
 				},
 				{
@@ -607,10 +682,7 @@ export async function findIngredientPathsLegacy(input: {
 				{
 					$addFields: {
 						ingredientNeighborId: {
-							$ifNull: [
-								'$ingredients.ingedientId',
-								'$ingredients.ingredientId',
-							],
+							$ifNull: ['$ingredients.ingedientId', null],
 						},
 					},
 				},
