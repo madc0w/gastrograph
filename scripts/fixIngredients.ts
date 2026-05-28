@@ -25,6 +25,12 @@ type ContainsReplaceRule = {
 	reason: string;
 };
 
+type SplitReplaceRule = {
+	needle: string;
+	replacements: string[];
+	reason: string;
+};
+
 type ExactDeleteRule = {
 	name: string;
 	reason: string;
@@ -33,10 +39,12 @@ type ExactDeleteRule = {
 type Stats = {
 	rulesEvaluated: number;
 	replaceRulesWithMatches: number;
+	splitRulesWithMatches: number;
 	deleteRulesWithMatches: number;
 	sourceIngredientsMatched: number;
 	replacementIngredientsCreated: number;
 	recipeRefsRewired: number;
+	recipeRefsAdded: number;
 	recipeRefsRemoved: number;
 	ingredientDocsDeleted: number;
 };
@@ -51,10 +59,18 @@ if (!MONGODB_URI || !MONGODB_DB) {
 
 const exactDeleteRules: ExactDeleteRule[] = [
 	{ name: 'all-purpose seasoning', reason: 'non-specific token' },
+	{ name: 'au jus', reason: 'requested removal' },
 	{ name: 'batter', reason: 'preparation state, not stable ingredient entity' },
+	{ name: 'bitter', reason: 'requested removal' },
+	{ name: 'canadian sharp', reason: 'requested removal' },
+	{ name: 'chicken-style', reason: 'requested removal' },
 	{ name: 'cracker barrel', reason: 'brand token, not ingredient name' },
 	{ name: 'dough', reason: 'preparation state, not stable ingredient entity' },
+	{ name: 'flavoring sauce', reason: 'requested removal' },
+	{ name: 'fryer', reason: 'requested removal' },
 	{ name: 'fry', reason: 'action token' },
+	{ name: 'grands homestyle', reason: 'requested removal' },
+	{ name: 'ground', reason: 'requested removal' },
 	{ name: 'herb', reason: 'too generic' },
 	{ name: 'herb blend', reason: 'too generic' },
 	{ name: 'herb mix', reason: 'too generic' },
@@ -62,15 +78,679 @@ const exactDeleteRules: ExactDeleteRule[] = [
 	{ name: 'instant chocolate', reason: 'ambiguous token' },
 	{ name: 'instant chicken', reason: 'ambiguous token' },
 	{ name: 'mixed herbs', reason: 'too generic' },
+	{ name: 'morsels', reason: 'requested removal' },
 	{ name: 'new', reason: 'noise token' },
 	{ name: 'nestle', reason: 'brand token' },
 	{ name: 'paraffin wax', reason: 'non-food ingredient record' },
+	{ name: 'powdered nestle', reason: 'requested removal' },
+	{ name: 'puff', reason: 'requested removal' },
+	{ name: 'red spanish', reason: 'requested removal' },
 	{ name: 'sauce', reason: 'too generic' },
+	{ name: 'splash', reason: 'requested removal' },
+	{ name: 'spice mix', reason: 'requested removal' },
 	{ name: 'soup', reason: 'too generic' },
 	{ name: 'spaghetti dinner', reason: 'dish, not ingredient' },
+	{ name: 'white morsels', reason: 'requested removal' },
+	{ name: 'yellow', reason: 'requested removal' },
+];
+
+const splitReplaceRules: SplitReplaceRule[] = [
+	{
+		needle: 'apple pear',
+		replacements: ['apple', 'pear'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'avocado chicken',
+		replacements: ['avocado', 'chicken'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'garlic potato',
+		replacements: ['garlic', 'potato'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'garlic shrimp',
+		replacements: ['garlic', 'shrimp'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'lemon blueberry',
+		replacements: ['lemon', 'blueberry'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'sugar cinnamon',
+		replacements: ['sugar', 'cinnamon'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'sugar butter',
+		replacements: ['sugar', 'butter'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'strawberry banana',
+		replacements: ['strawberry', 'banana'],
+		reason: 'requested split mapping',
+	},
+	{
+		needle: 'tarragon basil',
+		replacements: ['tarragon', 'basil'],
+		reason: 'requested split mapping',
+	},
 ];
 
 const containsReplaceRules: ContainsReplaceRule[] = [
+	{ needle: '7-up', replacement: '7-up soda', reason: 'requested mapping' },
+	{
+		needle: 'alaskan king crab',
+		replacement: 'king crab',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'almond flavor',
+		replacement: 'almond extract',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'almond flavoring',
+		replacement: 'almond extract',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'alioli',
+		replacement: 'aioli',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'all-bran',
+		replacement: 'all-bran cereal',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'all-purpose flour',
+		replacement: 'flour',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'all-purpose biscuit mix',
+		replacement: 'biscuit mix',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'amaretto liqueur',
+		replacement: 'amaretto',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'anisette liqueur',
+		replacement: 'anisette',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'arborio',
+		replacement: 'arborio rice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'assorted fresh fruit',
+		replacement: 'fruit',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'balsamic',
+		replacement: 'balsamic vinegar',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'baking molasses',
+		replacement: 'molasses',
+		reason: 'requested mapping',
+	},
+	{ needle: 'beans', replacement: 'bean', reason: 'requested mapping' },
+	{
+		needle: 'beef broth cube',
+		replacement: 'beef bouillon',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'beef bouillon cube',
+		replacement: 'beef bouillon',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'beef bouillon cubes',
+		replacement: 'beef bouillon',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'beef stew seasoning mix',
+		replacement: 'beef stew mix',
+		reason: 'requested mapping',
+	},
+	{ needle: 'biscuits', replacement: 'biscuit', reason: 'requested mapping' },
+	{
+		needle: 'black-eyed peas',
+		replacement: 'black-eyed pea',
+		reason: 'requested mapping',
+	},
+	{ needle: 'brie', replacement: 'brie cheese', reason: 'requested mapping' },
+	{
+		needle: 'brussels sprouts',
+		replacement: 'brussels sprout',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'burgundy wine',
+		replacement: 'burgundy',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'butterscotch morsels',
+		replacement: 'butterscotch chips',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'butterscotch bits',
+		replacement: 'butterscotch chips',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cajun seasoning salt',
+		replacement: 'cajun seasoning',
+		reason: 'requested mapping',
+	},
+	{ needle: 'cake flour', replacement: 'flour', reason: 'requested mapping' },
+	{ needle: 'cake yeast', replacement: 'yeast', reason: 'requested mapping' },
+	{ needle: 'capers', replacement: 'caper', reason: 'requested mapping' },
+	{
+		needle: 'caramel candy',
+		replacement: 'caramel',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'caramel topping',
+		replacement: 'caramel icing',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'caraway',
+		replacement: 'caraway seed',
+		reason: 'requested mapping',
+	},
+	{ needle: 'cashews', replacement: 'cashew', reason: 'requested mapping' },
+	{
+		needle: 'cayenne',
+		replacement: 'cayenne pepper',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cheddar',
+		replacement: 'cheddar cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cheese whiz',
+		replacement: 'cheez whiz',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'chicken quarter',
+		replacement: 'chicken',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'chicken stock base',
+		replacement: 'chicken stock',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'chicken stuffing mix',
+		replacement: 'chicken stuffing',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'chili salsa',
+		replacement: 'chili sauce',
+		reason: 'requested mapping',
+	},
+	{ needle: 'chives', replacement: 'chive', reason: 'requested mapping' },
+	{ needle: 'chunky salsa', replacement: 'salsa', reason: 'requested mapping' },
+	{ needle: 'codfish', replacement: 'cod', reason: 'requested mapping' },
+	{ needle: 'coke', replacement: 'coca-cola', reason: 'requested mapping' },
+	{
+		needle: 'cool whip',
+		replacement: 'cool whip whipped topping',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'corn husks',
+		replacement: 'corn husk',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cornstarch',
+		replacement: 'corn starch',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'country mustard',
+		replacement: 'mustard',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cream style corn',
+		replacement: 'creamed corn',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cream corn',
+		replacement: 'creamed corn',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'cream-style horseradish',
+		replacement: 'horseradish',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'creamed cottage cheese',
+		replacement: 'cottage cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'creamy peanut butter',
+		replacement: 'peanut butter',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'dark rye bread',
+		replacement: 'rye bread',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'doritos',
+		replacement: 'doritos chips',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'dinner rolls',
+		replacement: 'dinner roll',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'curly endive',
+		replacement: 'endive',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'instant milk powder',
+		replacement: 'milk powder',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'dry milk',
+		replacement: 'milk powder',
+		reason: 'requested mapping',
+	},
+	{ needle: 'enriched rice', replacement: 'rice', reason: 'requested mapping' },
+	{
+		needle: 'filo dough',
+		replacement: 'phyllo dough',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'frozen apples',
+		replacement: 'apple',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'fontina',
+		replacement: 'fontina cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'french fried onion rings',
+		replacement: 'french fried onion',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'french fried onions',
+		replacement: 'french fried onion',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'galliano liqueur',
+		replacement: 'galliano',
+		reason: 'requested mapping',
+	},
+	{ needle: 'garden pea', replacement: 'pea', reason: 'requested mapping' },
+	{
+		needle: 'garlic rolls',
+		replacement: 'garlic roll',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'gorgonzola',
+		replacement: 'gorgonzola cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'ground cinnamon',
+		replacement: 'cinnamon',
+		reason: 'requested mapping',
+	},
+	{ needle: 'ground cumin', replacement: 'cumin', reason: 'requested mapping' },
+	{
+		needle: 'ground pepper',
+		replacement: 'pepper',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'ground round',
+		replacement: 'ground round steak',
+		reason: 'requested mapping',
+	},
+	{ needle: 'ground thyme', replacement: 'thyme', reason: 'requested mapping' },
+	{
+		needle: 'ground walnuts',
+		replacement: 'walnuts',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'ground white pepper',
+		replacement: 'white pepper',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'gummy worms',
+		replacement: 'gummy worm',
+		reason: 'requested mapping',
+	},
+	{ needle: 'hearts', replacement: 'heart', reason: 'requested mapping' },
+	{
+		needle: 'instant potato',
+		replacement: 'instant potato flakes',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'lemon flavor',
+		replacement: 'lemon flavoring',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'lemon extract',
+		replacement: 'lemon flavoring',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'lemon pepper',
+		replacement: 'lemon pepper seasoning',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'lite salt',
+		replacement: 'light salt',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'long grain converted rice',
+		replacement: 'long grain rice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'long grain',
+		replacement: 'long grain rice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'long-grain rice',
+		replacement: 'long grain rice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'low-fat monterey',
+		replacement: 'monterey cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'macaroni shells',
+		replacement: 'macaroni',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'maraschino cherry syrup',
+		replacement: 'maraschino cherry juice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'mascarpone',
+		replacement: 'mascarpone cheese',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'mixed spice',
+		replacement: 'mixed spices',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'mock crab meat',
+		replacement: 'imitation crab meat',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'monterey',
+		replacement: 'monterey cheese',
+		reason: 'requested mapping',
+	},
+	{ needle: 'noodle', replacement: 'noodles', reason: 'requested mapping' },
+	{ needle: 'nut meats', replacement: 'nutmeat', reason: 'requested mapping' },
+	{
+		needle: 'orange extract',
+		replacement: 'orange flavoring',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'orange flavor',
+		replacement: 'orange flavoring',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'other vegetables',
+		replacement: 'vegetables',
+		reason: 'requested mapping',
+	},
+	{ needle: 'peanuts', replacement: 'peanut', reason: 'requested mapping' },
+	{ needle: 'pea bean', replacement: 'pea', reason: 'requested mapping' },
+	{ needle: 'pea pods', replacement: 'pea pod', reason: 'requested mapping' },
+	{ needle: 'peas', replacement: 'pea', reason: 'requested mapping' },
+	{ needle: 'pecans', replacement: 'pecan', reason: 'requested mapping' },
+	{
+		needle: 'pepperoncini pepper',
+		replacement: 'pepperoncini',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'persimmon pulp',
+		replacement: 'persimmon',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'phyllo',
+		replacement: 'phyllo dough',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'phyllo pastry',
+		replacement: 'phyllo dough',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'pie shell',
+		replacement: 'pie crust',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'pie pastry',
+		replacement: 'pie crust',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'pie crust dough',
+		replacement: 'pie crust',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'popped corn',
+		replacement: 'popcorn',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'pork shoulder steak',
+		replacement: 'pork shoulder',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'powdered creamer',
+		replacement: 'powdered nondairy creamer',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'red pepper flakes',
+		replacement: 'red pepper',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'rice krispies',
+		replacement: 'rice krispies cereal',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'rice crispies',
+		replacement: 'rice krispies cereal',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'rice crispies cereal',
+		replacement: 'rice krispies cereal',
+		reason: 'requested mapping',
+	},
+	{ needle: 'rolls', replacement: 'roll', reason: 'requested mapping' },
+	{
+		needle: 'salad supreme',
+		replacement: 'salad supreme seasoning',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'soft breadcrumbs',
+		replacement: 'breadcrumbs',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'soup bones',
+		replacement: 'soup bone',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'special k',
+		replacement: 'special k cereal',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'strawberry preserves',
+		replacement: 'strawberry jam',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'sunflower seeds',
+		replacement: 'sunflower seed',
+		reason: 'requested mapping',
+	},
+	{
+		needle: "sweet'n low",
+		replacement: "sweet 'n low",
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'tart shell',
+		replacement: 'tart crust',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'tender quick',
+		replacement: 'tender quick salt',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'thin spaghetti',
+		replacement: 'spaghetti',
+		reason: 'requested mapping',
+	},
+	{ needle: 'tomatoes', replacement: 'tomato', reason: 'requested mapping' },
+	{
+		needle: 'tri-color rotini',
+		replacement: 'tricolor rotini',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'unflavored gelatine',
+		replacement: 'unflavored gelatin',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'vanilla flavoring',
+		replacement: 'vanilla extract',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'vegetable juice cocktail',
+		replacement: 'vegetable juice',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'vegetables',
+		replacement: 'vegetable',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'vermicelli spaghetti',
+		replacement: 'vermicelli',
+		reason: 'requested mapping',
+	},
+	{ needle: 'walnuts', replacement: 'walnut', reason: 'requested mapping' },
+	{
+		needle: 'water-packed tuna',
+		replacement: 'tuna',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'white zinfandel wine',
+		replacement: 'zinfandel',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'white zinfandel',
+		replacement: 'zinfandel',
+		reason: 'requested mapping',
+	},
+	{ needle: 'white tuna', replacement: 'tuna', reason: 'requested mapping' },
+	{
+		needle: 'yellowfin tuna',
+		replacement: 'tuna',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'frozen lima bean',
+		replacement: 'lima bean',
+		reason: 'requested mapping',
+	},
+	{
+		needle: 'crab boil concentrate',
+		replacement: 'crab boil',
+		reason: 'requested mapping',
+	},
 	{
 		needle: 'bread crumbs',
 		replacement: 'breadcrumbs',
@@ -96,6 +776,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		replacement: 'andouille sausage',
 		reason: 'canonical meat form',
 	},
+	{
+		needle: 'anchovy fillets',
+		replacement: 'anchovy',
+		reason: 'requested mapping',
+	},
 	{ needle: 'bay', replacement: 'bay leaf', reason: 'canonical herb form' },
 	{ needle: 'beef tips', replacement: 'beef tip', reason: 'depluralize' },
 	{
@@ -107,6 +792,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		needle: 'chicken mushroom',
 		replacement: 'chicken mushroom soup',
 		reason: 'canonical soup name',
+	},
+	{
+		needle: 'grain vodka',
+		replacement: 'vodka',
+		reason: 'requested mapping',
 	},
 	{
 		needle: 'chicken gumbo',
@@ -246,6 +936,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		reason: 'canonical dish ingredient form',
 	},
 	{
+		needle: 'havana club',
+		replacement: 'rum',
+		reason: 'requested mapping',
+	},
+	{
 		needle: 'heath bar chips',
 		replacement: 'heath bar',
 		reason: 'canonical candy name',
@@ -259,6 +954,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		needle: 'heath candy bar',
 		replacement: 'heath bar',
 		reason: 'canonical candy name',
+	},
+	{
+		needle: 'hennessy brandy',
+		replacement: 'brandy',
+		reason: 'requested mapping',
 	},
 	{
 		needle: 'honeydew',
@@ -281,6 +981,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		reason: 'canonicalize bean variety',
 	},
 	{ needle: 'lentils', replacement: 'lentil', reason: 'depluralize' },
+	{
+		needle: 'london dry gin',
+		replacement: 'gin',
+		reason: 'requested mapping',
+	},
 	{ needle: 'meatballs', replacement: 'meatball', reason: 'depluralize' },
 	{
 		needle: "miniature reese's",
@@ -315,6 +1020,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 	{ needle: 'navy beans', replacement: 'navy bean', reason: 'depluralize' },
 	{ needle: 'oat', replacement: 'oats', reason: 'canonical grain form' },
 	{ needle: 'olives', replacement: 'olive', reason: 'depluralize' },
+	{
+		needle: 'orange-flavor liqueur',
+		replacement: 'triple sec',
+		reason: 'requested mapping',
+	},
 	{
 		needle: 'orange flavored drink',
 		replacement: 'orange drink',
@@ -474,6 +1184,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		replacement: 'soda cracker',
 		reason: 'depluralize',
 	},
+	{
+		needle: 'spiny lobster',
+		replacement: 'lobster',
+		reason: 'requested mapping',
+	},
 	{ needle: 'strawberries', replacement: 'strawberry', reason: 'depluralize' },
 	{
 		needle: 'tabasco',
@@ -514,6 +1229,11 @@ const containsReplaceRules: ContainsReplaceRule[] = [
 		needle: 'worcestershire',
 		replacement: 'worcestershire sauce',
 		reason: 'expand condiment name',
+	},
+	{
+		needle: 'wild alaskan salmon',
+		replacement: 'salmon',
+		reason: 'requested mapping',
 	},
 	{
 		needle: 'yellow lima beans',
@@ -640,6 +1360,94 @@ async function applyExactDeleteRule(
 	);
 }
 
+async function applySplitReplaceRule(
+	rule: SplitReplaceRule,
+	ingredientsCollection: Collection<IngredientDoc>,
+	recipesCollection: Collection<RecipeDoc>,
+	stats: Stats,
+): Promise<void> {
+	const source = rule.needle.trim().toLowerCase();
+	const replacements = rule.replacements.map((value) =>
+		value.trim().toLowerCase(),
+	);
+
+	const regex = new RegExp(escRegex(source), 'i');
+	const matches = (await ingredientsCollection
+		.find({ name: { $regex: regex } })
+		.toArray()) as IngredientDoc[];
+	if (matches.length === 0) {
+		return;
+	}
+
+	stats.splitRulesWithMatches += 1;
+	const replacementIds = await Promise.all(
+		replacements.map((replacement) =>
+			getOrCreateIngredient(ingredientsCollection, replacement, stats),
+		),
+	);
+
+	let changedDocs = 0;
+	let addedRefs = 0;
+
+	for (const doc of matches) {
+		if (!doc._id) {
+			continue;
+		}
+
+		stats.sourceIngredientsMatched += 1;
+		const recipes = (await recipesCollection
+			.find(
+				{ 'ingredients.ingedientId': doc._id },
+				{ projection: { ingredients: 1 } },
+			)
+			.toArray()) as Array<{ _id?: ObjectId; ingredients?: IngredientRef[] }>;
+
+		for (const recipe of recipes) {
+			if (!recipe._id) {
+				continue;
+			}
+
+			const sourceRefs = (recipe.ingredients ?? []).filter((item) =>
+				item.ingedientId?.equals(doc._id),
+			);
+			if (sourceRefs.length === 0) {
+				continue;
+			}
+
+			const refTemplate = sourceRefs[0];
+			const replacementRefs = replacementIds.map((replacementId, index) => ({
+				ingredient: replacements[index],
+				ingedientId: replacementId,
+				quantity: refTemplate.quantity,
+			}));
+			const updatedIngredients = (recipe.ingredients ?? [])
+				.filter((item) => !item.ingedientId?.equals(doc._id))
+				.concat(replacementRefs);
+
+			await recipesCollection.updateOne(
+				{ _id: recipe._id },
+				{ $set: { ingredients: updatedIngredients } },
+			);
+
+			addedRefs += replacementRefs.length;
+		}
+
+		const deleted = await ingredientsCollection.deleteOne({ _id: doc._id });
+		if (deleted.deletedCount > 0) {
+			changedDocs += deleted.deletedCount;
+		}
+	}
+
+	stats.recipeRefsAdded += addedRefs;
+	stats.ingredientDocsDeleted += changedDocs;
+
+	if (changedDocs > 0 || addedRefs > 0) {
+		console.log(
+			`SPLIT contains "${source}" -> "${replacements.join(', ')}" (${rule.reason}) | ingredient docs: ${changedDocs}, refs added: ${addedRefs}`,
+		);
+	}
+}
+
 async function applyContainsReplaceRule(
 	rule: ContainsReplaceRule,
 	ingredientsCollection: Collection<IngredientDoc>,
@@ -706,12 +1514,17 @@ async function fixIngredients(): Promise<void> {
 	await client.connect();
 
 	const stats: Stats = {
-		rulesEvaluated: exactDeleteRules.length + containsReplaceRules.length,
+		rulesEvaluated:
+			exactDeleteRules.length +
+			splitReplaceRules.length +
+			containsReplaceRules.length,
 		replaceRulesWithMatches: 0,
+		splitRulesWithMatches: 0,
 		deleteRulesWithMatches: 0,
 		sourceIngredientsMatched: 0,
 		replacementIngredientsCreated: 0,
 		recipeRefsRewired: 0,
+		recipeRefsAdded: 0,
 		recipeRefsRemoved: 0,
 		ingredientDocsDeleted: 0,
 	};
@@ -723,6 +1536,15 @@ async function fixIngredients(): Promise<void> {
 
 		for (const rule of exactDeleteRules) {
 			await applyExactDeleteRule(
+				rule,
+				ingredientsCollection,
+				recipesCollection,
+				stats,
+			);
+		}
+
+		for (const rule of splitReplaceRules) {
+			await applySplitReplaceRule(
 				rule,
 				ingredientsCollection,
 				recipesCollection,
@@ -743,6 +1565,7 @@ async function fixIngredients(): Promise<void> {
 		console.log('Summary:');
 		console.log(`Rules evaluated: ${stats.rulesEvaluated}`);
 		console.log(`Replace rules with matches: ${stats.replaceRulesWithMatches}`);
+		console.log(`Split rules with matches: ${stats.splitRulesWithMatches}`);
 		console.log(`Delete rules with matches: ${stats.deleteRulesWithMatches}`);
 		console.log(
 			`Source ingredient docs matched: ${stats.sourceIngredientsMatched}`,
@@ -751,6 +1574,7 @@ async function fixIngredients(): Promise<void> {
 			`Replacement ingredient docs created: ${stats.replacementIngredientsCreated}`,
 		);
 		console.log(`Recipe refs rewired: ${stats.recipeRefsRewired}`);
+		console.log(`Recipe refs added: ${stats.recipeRefsAdded}`);
 		console.log(`Recipe refs removed: ${stats.recipeRefsRemoved}`);
 		console.log(`Ingredient docs deleted: ${stats.ingredientDocsDeleted}`);
 	} finally {

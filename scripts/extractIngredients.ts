@@ -7,6 +7,7 @@ type IngredientRow = {
 	_id: string;
 	name: string;
 	type: string;
+	count: string;
 	creationDate: string;
 };
 
@@ -36,12 +37,13 @@ function escapeCsvValue(value: string): string {
 }
 
 function toCsv(rows: IngredientRow[]): string {
-	const header = '_id,name,type,creationDate';
+	const header = '_id,name,type,count,creationDate';
 	const lines = rows.map((row) =>
 		[
 			escapeCsvValue(row._id),
 			escapeCsvValue(row.name),
 			escapeCsvValue(row.type),
+			escapeCsvValue(row.count),
 			escapeCsvValue(row.creationDate),
 		].join(','),
 	);
@@ -79,7 +81,18 @@ async function extractIngredients(): Promise<void> {
 		const ingredientsCollection = await getIngredientCollection(db);
 
 		const rawDocs = await ingredientsCollection
-			.find({}, { projection: { _id: 1, name: 1, type: 1, creationDate: 1 } })
+			.find(
+				{},
+				{
+					projection: {
+						_id: 1,
+						name: 1,
+						type: 1,
+						recipeCount: 1,
+						creationDate: 1,
+					},
+				},
+			)
 			.sort({ creationDate: 1, name: 1 })
 			.toArray();
 
@@ -87,6 +100,7 @@ async function extractIngredients(): Promise<void> {
 			_id: String(doc._id ?? ''),
 			name: String(doc.name ?? ''),
 			type: String(doc.type ?? ''),
+			count: String(doc.recipeCount ?? ''),
 			creationDate:
 				doc.creationDate instanceof Date
 					? doc.creationDate.toISOString()
