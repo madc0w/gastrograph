@@ -26,7 +26,13 @@
 					type="button"
 					class="tabButton"
 					:class="{ active: activeTab === 'path' }"
-					role="tab"
+					({{
+					graphProgressPercent
+					}}%)
+					-
+					{{
+					graphProgressMessage
+					}}
 					:aria-selected="activeTab === 'path'"
 					@click="activeTab = 'path'"
 				>
@@ -51,10 +57,13 @@
 							/>
 							<button
 								type="submit"
-								class="primaryButton"
+								class="primaryButton searchSubmitButton"
 								:disabled="isGraphLoading"
 							>
-								OK
+								<span v-if="!isGraphLoading">OK</span>
+								<span v-else class="searchLoadingLabel"
+									>{{ graphProgressPercent }}%</span
+								>
 							</button>
 						</div>
 					</form>
@@ -68,7 +77,30 @@
 						<p v-if="centerName">
 							Centered on <strong>{{ centerName }}</strong>
 						</p>
+						<p v-else-if="isGraphLoading">Building graph...</p>
 						<p v-else>Enter an ingredient to build a graph.</p>
+					</div>
+
+					<div
+						v-if="isGraphLoading"
+						class="graphLoadingLayer"
+						role="progressbar"
+						aria-valuemin="0"
+						aria-valuemax="100"
+						:aria-valuenow="graphProgressPercent"
+						aria-live="polite"
+					>
+						<div class="graphProgressTrack" aria-hidden="true">
+							<div
+								class="graphProgressFill"
+								:style="{ width: `${graphProgressPercent}%` }"
+							></div>
+						</div>
+						<p>
+							Building graph for
+							<strong>{{ loadingIngredientName }}</strong>
+							({{ graphProgressPercent }}%) ...
+						</p>
 					</div>
 
 					<div
@@ -399,6 +431,48 @@ type IngredientRecipesResponse = {
 	titles: RecipeListItem[];
 };
 
+type GraphResponse = {
+	center: { id: string; name: string; recipeCount: number };
+	nodes: GraphApiNode[];
+	links: GraphApiLink[];
+};
+
+type GraphProgressStage =
+	| 'validating'
+	| 'resolving-center'
+	| 'counting-links'
+	| 'loading-neighbors'
+	| 'counting-recipes'
+	| 'assembling'
+	| 'complete';
+
+type GraphSearchStartResponse = {
+	jobId: string;
+	status: 'pending';
+};
+
+type GraphSearchStatusResponse =
+	| {
+			status: 'pending';
+			progress: number;
+			stage: GraphProgressStage;
+			message: string;
+	  }
+	| {
+			status: 'done';
+			progress: 100;
+			stage: GraphProgressStage;
+			message: string;
+			result: GraphResponse;
+	  }
+	| {
+			status: 'error';
+			progress: number;
+			stage: GraphProgressStage;
+			message: string;
+			error: string;
+	  };
+
 type RecipeDetails = {
 	title: string;
 	ingredients: Array<{
@@ -493,6 +567,9 @@ const svgRef = ref<SVGSVGElement | null>(null);
 const hoverCardRef = ref<HTMLDivElement | null>(null);
 
 const isGraphLoading = ref(false);
+const graphProgressPercent = ref(0);
+const loadingIngredientName = ref('');
+const graphProgressMessage = ref('Queued');
 
 const centerName = ref('');
 const centerId = ref('');
@@ -546,6 +623,7 @@ const nodeById = computed(() => {
 
 let simulationFrame = 0;
 let hoverCloseTimer: ReturnType<typeof setTimeout> | null = null;
+let graphSearchRequestId = 0;
 let pathSearchRequestId = 0;
 const dragState = reactive({
 	nodeId: '',
@@ -577,6 +655,7 @@ const hoverState = reactive({
 });
 
 const recipeTitlesByNodeId = reactive<Record<string, RecipeListItem[]>>({});
+const graphCache = new Map<string, GraphResponse>();
 
 function getRecipeCacheKey(nodeId: string): string {
 	return `${centerId.value}:${nodeId}`;
@@ -842,6 +921,8 @@ async function loadRecipeDetails(
 }
 
 async function submitIngredient(): Promise<void> {
+	graphSearchRequestId += 1;
+	const requestId = graphSearchRequestId;
 	const ingredient = query.value.trim();
 	if (!ingredient) {
 		errorText.value = 'Type an ingredient name first.';
@@ -850,17 +931,92 @@ async function submitIngredient(): Promise<void> {
 	}
 
 	isGraphLoading.value = true;
+	loadingIngredientName.value = ingredient;
+	graphProgressPercent.value = 1;
+	graphProgressMessage.value = 'Queued';
 	errorText.value = '';
-	hintText.value = '';
+	hintText.value = `Building graph for ${ingredient}...`;
+
+	const cacheKey = ingredient.toLowerCase();
+	const cachedResponse = graphCache.get(cacheKey);
+	if (cachedResponse) {
+		centerId.value = cachedResponse.center.id;
+		centerName.value = cachedResponse.center.name;
+		query.value = cachedResponse.center.name;
+		renderedNodes.value = createNodeLayout(cachedResponse.nodes);
+		rebuildRenderedLinks(cachedResponse.links);
+		runSimulation(cachedResponse.links);
+		hideHoverCard();
+		hintText.value =
+			cachedResponse.links.length > 0
+				? `${cachedResponse.center.name} appears in ${cachedResponse.center.recipeCount} recipes with ${cachedResponse.links.length} linked ingredients.`
+				: `${cachedResponse.center.name} was found, but no linked ingredients were available in recipes.`;
+		graphProgressPercent.value = 100;
+		graphProgressMessage.value = 'Graph ready';
+		isGraphLoading.value = false;
+		return;
+	}
 
 	try {
-		const response = await $fetch<{
-			center: { id: string; name: string; recipeCount: number };
-			nodes: GraphApiNode[];
-			links: GraphApiLink[];
-		}>('/api/graph', {
-			query: { ingredient },
-		});
+		const startResponse = await $fetch<GraphSearchStartResponse>(
+			'/api/graph/start',
+			{
+				method: 'POST',
+				body: { ingredient },
+			},
+		);
+
+		const pollIntervalMs = 250;
+		const maxWaitMs = 10 * 60 * 1000;
+		const maxPolls = Math.ceil(maxWaitMs / pollIntervalMs);
+		let response: GraphResponse | null = null;
+
+		for (let poll = 0; poll < maxPolls; poll += 1) {
+			if (requestId !== graphSearchRequestId) {
+				return;
+			}
+
+			const status = await $fetch<GraphSearchStatusResponse>(
+				'/api/graph/status',
+				{
+					query: {
+						jobId: startResponse.jobId,
+					},
+				},
+			);
+
+			if (requestId !== graphSearchRequestId) {
+				return;
+			}
+
+			graphProgressPercent.value = Math.min(100, Math.max(0, status.progress));
+			graphProgressMessage.value = status.message;
+			hintText.value = `${status.message} (${status.progress}%)`;
+
+			if (status.status === 'done') {
+				response = status.result;
+				break;
+			}
+
+			if (status.status === 'error') {
+				throw createError({
+					statusCode: 500,
+					statusMessage: status.error,
+				});
+			}
+
+			await wait(pollIntervalMs);
+		}
+
+		if (!response) {
+			throw createError({
+				statusCode: 408,
+				statusMessage:
+					'Graph search is taking too long. Try another ingredient.',
+			});
+		}
+
+		graphCache.set(cacheKey, response);
 
 		centerId.value = response.center.id;
 		centerName.value = response.center.name;
@@ -874,14 +1030,23 @@ async function submitIngredient(): Promise<void> {
 			response.links.length > 0
 				? `${response.center.name} appears in ${response.center.recipeCount} recipes with ${response.links.length} linked ingredients.`
 				: `${response.center.name} was found, but no linked ingredients were available in recipes.`;
+		graphProgressPercent.value = 100;
+		graphProgressMessage.value = 'Graph ready';
 	} catch (error: unknown) {
+		if (requestId !== graphSearchRequestId) {
+			return;
+		}
+
 		const message =
 			typeof error === 'object' && error && 'statusMessage' in error
 				? String((error as { statusMessage?: string }).statusMessage)
 				: 'Could not build graph for that ingredient.';
+		graphProgressMessage.value = 'Failed';
 		errorText.value = message;
 	} finally {
-		isGraphLoading.value = false;
+		if (requestId === graphSearchRequestId) {
+			isGraphLoading.value = false;
+		}
 	}
 }
 
@@ -1449,6 +1614,20 @@ h1 {
 	transform: none;
 }
 
+.searchSubmitButton {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 72px;
+	height: 46px;
+	padding: 0 0.9rem;
+}
+
+.searchLoadingLabel {
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.01em;
+}
+
 .pathActions .primaryButton {
 	display: inline-flex;
 	align-items: center;
@@ -1466,6 +1645,45 @@ h1 {
 	border: 2px solid rgba(247, 247, 247, 0.28);
 	border-top-color: #f7f7f7;
 	animation: pathButtonSpin 0.7s linear infinite;
+}
+
+.graphLoadingLayer {
+	position: absolute;
+	inset: 3.15rem 0.8rem 0.8rem;
+	z-index: 4;
+	display: grid;
+	place-content: center;
+	justify-items: center;
+	gap: 0.75rem;
+	text-align: center;
+	border-radius: 12px;
+	background: rgba(255, 255, 255, 0.82);
+	backdrop-filter: blur(1.5px);
+	color: #283618;
+	font-weight: 700;
+	padding: 1rem;
+	pointer-events: none;
+}
+
+.graphLoadingLayer p {
+	margin: 0;
+	font-size: 0.95rem;
+}
+
+.graphProgressTrack {
+	width: min(480px, 88%);
+	height: 0.78rem;
+	border-radius: 999px;
+	overflow: hidden;
+	background: rgba(40, 54, 24, 0.14);
+	box-shadow: inset 0 0 0 1px rgba(40, 54, 24, 0.18);
+}
+
+.graphProgressFill {
+	height: 100%;
+	border-radius: 999px;
+	background: linear-gradient(90deg, #7a8a4a 0%, #3d5226 70%, #283618 100%);
+	transition: width 0.24s ease;
 }
 
 @keyframes pathButtonSpin {

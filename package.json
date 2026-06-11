@@ -8,6 +8,7 @@
 		"generate": "nuxt generate",
 		"preview": "nuxt preview",
 		"start": "node .output/server/index.mjs",
+		"indexes:graph": "node scripts/ensureGraphIndexes.mjs",
 		"heroku-postbuild": "npm run build",
 		"postinstall": "nuxt prepare"
 	},
